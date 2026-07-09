@@ -17,6 +17,7 @@ Design goals (see ../docs/ENGINE_NOTES.md for the reverse-engineered `obs` schem
 import ctypes
 import json
 import os
+import re
 
 # ---------------------------------------------------------------------------
 # Card / attack database (loaded once from the native engine shipped inside
@@ -61,9 +62,9 @@ DECK_CSV_PATH = os.path.join(_HERE, "deck.csv")
 # time, we still submit a legal 60-card deck instead of instant-losing.
 # Kept in sync with deck.csv (see that file for card-by-card commentary).
 DEFAULT_DECK = (
-    [721] * 2 + [722] * 4 + [723] * 4
-    + [1092] * 1 + [1121] * 2 + [1145] * 2 + [1163] * 2 + [1219] * 4 + [1227] * 4 + [1262] * 2
-    + [3] * 33
+    [333] * 4 + [678] * 4
+    + [1086] * 4 + [1121] * 4 + [1219] * 4 + [1227] * 4 + [1182] * 4 + [1213] * 4 + [1163] * 4
+    + [6] * 24
 )
 
 
@@ -76,6 +77,24 @@ def load_deck():
     except Exception:
         pass
     return list(DEFAULT_DECK)
+
+
+def _own_deck_energy_ratio():
+    """Fraction of our own deck that's Basic/Special Energy. Used to
+    estimate the payoff of "discard N, deal X per Energy discarded"
+    attacks (see attack_score) -- computed once at import time since the
+    deck doesn't change mid-match."""
+    try:
+        deck = load_deck()
+        if not deck:
+            return 0.0
+        energy_count = sum(1 for cid in deck if CARD_DB.get(cid, {}).get("cardType") in (5, 6))
+        return energy_count / len(deck)
+    except Exception:
+        return 0.0
+
+
+OWN_DECK_ENERGY_RATIO = _own_deck_energy_ratio()
 
 
 # ---------------------------------------------------------------------------
@@ -218,9 +237,65 @@ def cheap_reliable_damage(card):
     return best
 
 
+_DISCARD_ENERGY_DAMAGE_RE = re.compile(
+    r"discard the top (\d+) cards.*?(\d+) damage for each (?:basic )?\{?\w*\}?\s*energy", re.IGNORECASE
+)
+
+
+def _expected_discard_damage(text):
+    """Some attacks read `damage: 0` in the raw data but their effect text
+    describes a real conditional payoff -- e.g. Mega Abomasnow ex's
+    Hammer-lanche ("discard the top 6 cards of your deck, 100 damage for
+    each Basic Energy discarded"). A real match replay showed an opponent
+    using this exact attack for 300-500 damage per hit every turn while our
+    agent never once selected it, since attack_score only ever looked at
+    the flat `damage` field. This estimates the payoff from our own deck's
+    energy density instead of silently treating it as zero."""
+    m = _DISCARD_ENERGY_DAMAGE_RE.search(text or "")
+    if not m:
+        return 0.0
+    n_cards, per_energy = int(m.group(1)), int(m.group(2))
+    return n_cards * OWN_DECK_ENERGY_RATIO * per_energy
+
+
+_DISCARD_PILE_ENERGY_DAMAGE_RE = re.compile(
+    r"(\d+) damage for each (?:basic )?\{?\w*\}?\s*energy card in your discard pile", re.IGNORECASE
+)
+
+
+def _discard_pile_damage(obs, text):
+    """Kyogre's Riptide ("20 damage for each Basic Water Energy card in
+    your discard pile") also reads `damage: 0` in the raw data, but unlike
+    Hammer-lanche this scales with a number we can count exactly from
+    `obs` right now rather than estimate -- our own discard pile. A real
+    match replay showed us using this attack 61 times while still treating
+    it as zero-damage in the scoring, missing how much stronger it gets as
+    the game goes on and energy piles up in the discard. Returns None (not
+    0.0) when the text doesn't match, so callers can fall back to other
+    damage-estimation patterns instead of assuming zero."""
+    m = _DISCARD_PILE_ENERGY_DAMAGE_RE.search(text or "")
+    if not m:
+        return None
+    per_energy = int(m.group(1))
+    cur = obs.get("current")
+    if not cur:
+        return 0.0
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        discard = p.get("discard") or []
+        energy_count = sum(1 for c in discard if CARD_DB.get(c.get("id"), {}).get("cardType") in (5, 6))
+        return energy_count * per_energy
+    except Exception:
+        return 0.0
+
+
 def attack_score(obs, attack_id):
     atk = ATTACK_DB.get(attack_id)
     dmg = (atk.get("damage") if atk else 0) or 0
+    if atk and dmg == 0:
+        text = atk.get("text")
+        discard_pile_dmg = _discard_pile_damage(obs, text)
+        dmg = discard_pile_dmg if discard_pile_dmg is not None else _expected_discard_damage(text)
     score = 60.0 + dmg / 5.0
     opp_hp = get_opponent_active_hp(obs)
     if opp_hp is not None and opp_hp > 0 and dmg >= opp_hp:
@@ -278,6 +353,25 @@ def bench_is_thin(obs):
         return False
 
 
+def hand_has_pokemon(obs):
+    """True when our hand currently holds at least one Basic Pokemon --
+    the only kind that can go straight onto an empty bench slot (an
+    evolution card in hand needs a Basic already in play first, so it
+    doesn't help here). Real replays showed losses where the bench never
+    got going because no *playable* Pokemon showed up in hand -- this flags
+    that specific dead end so a big-draw Supporter can be prioritized over
+    topping off energy instead."""
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        hand = p.get("hand") or []
+        return any(CARD_DB.get(c.get("id"), {}).get("basic") for c in hand)
+    except Exception:
+        return False
+
+
 def opponent_underprepared(obs):
     """True when the opponent's active has no energy attached and their
     bench is empty -- a rough "they haven't set up yet" signal. Worth
@@ -329,6 +423,10 @@ def score_option(obs, sel, option):
       so attack more" override was tried and measurably made things worse in
       self-play here -- this deck's plan is a slow evolution into a big
       attacker, so being behind means "catch up on energy," not "swing now.")
+    - a big-draw Supporter beats attaching energy when the bench is thin and
+      no Pokemon is in hand to put on it (see `hand_has_pokemon`) -- digging
+      for a body to play is more urgent than energy that has nowhere new to
+      go yet.
 
     A "stop stacking energy on an already-maxed attacker, spread it to the
     bench instead" override was also tried (replays visibly showed a 4th/5th
@@ -375,7 +473,13 @@ def score_option(obs, sel, option):
         card = resolve_card_by_area(obs, sel, AREA_HAND, option.get("index"))
         is_bench_pokemon = card and card.get("cardType") == 0
         urgent = is_bench_pokemon and (bench_is_thin(obs) or active_in_danger(obs))
-        tier = 10 if urgent else 7
+        text = " ".join(s.get("text", "") for s in (card.get("skills") or [])).lower() if card else ""
+        # No Pokemon in hand with a thin bench is the exact dead end that
+        # cost us games in replay review -- dig for one with a big draw
+        # card before spending the turn on energy that won't have anywhere
+        # new to go.
+        digging = "draw" in text and bench_is_thin(obs) and not hand_has_pokemon(obs)
+        tier = 10 if urgent else (8.6 if digging else 7)
         return (tier, card_value(card))
     if t in (OPT_ATTACH, OPT_ENERGY):
         in_play_index = option.get("inPlayIndex", 0)
