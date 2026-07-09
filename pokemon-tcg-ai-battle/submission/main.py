@@ -295,6 +295,35 @@ def opponent_underprepared(obs):
         return False
 
 
+def in_play_has_max_energy(obs, in_play_index):
+    """True when the Pokemon at this in-play slot already holds enough
+    energy for its priciest attack. Real replays showed us piling a 4th or
+    5th energy onto an already-ready attacker while the bench sat empty --
+    once a Pokemon is maxed out, more energy is wasted and should go to
+    whoever's still short instead."""
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        card_id = resolve_inplay_id(obs, in_play_index)
+        card = CARD_DB.get(card_id)
+        if not card or not card.get("attacks"):
+            return False
+        p = cur["players"][cur["yourIndex"]]
+        if in_play_index == 0:
+            mon = (p.get("active") or [None])[0]
+        else:
+            bench = p.get("bench") or []
+            mon = bench[in_play_index - 1] if 0 <= in_play_index - 1 < len(bench) else None
+        if not mon:
+            return False
+        have = len(mon.get("energies") or [])
+        max_cost = max((len(ATTACK_DB.get(aid, {}).get("energies") or []) for aid in card["attacks"]), default=0)
+        return max_cost > 0 and have >= max_cost
+    except Exception:
+        return False
+
+
 def attack_is_lethal(obs, attack_id):
     """True when this attack's flat damage would KO the opponent's active
     right now. Ending the exchange and banking a prize outranks any setup
@@ -329,6 +358,10 @@ def score_option(obs, sel, option):
       so attack more" override was tried and measurably made things worse in
       self-play here -- this deck's plan is a slow evolution into a big
       attacker, so being behind means "catch up on energy," not "swing now.")
+    - among ATTACH targets, a Pokemon already holding enough energy for its
+      priciest attack drops down the tiebreak so energy spreads to whoever's
+      still short (see `in_play_has_max_energy`) instead of stacking forever
+      on one attacker while the bench never gets going.
     """
     t = option.get("type")
     ctx = sel.get("context")
@@ -358,7 +391,11 @@ def score_option(obs, sel, option):
     if t == OPT_ATTACK:
         if attack_is_lethal(obs, option.get("attackId")):
             tier = 11
-        elif opponent_underprepared(obs):
+        elif opponent_underprepared(obs) or in_play_has_max_energy(obs, 0):
+            # Once our active can't usefully hold more energy, attaching to
+            # the bench instead (see in_play_has_max_energy) must not keep
+            # outranking attacking forever -- otherwise the active just sits
+            # there fully loaded while we spend every turn feeding the bench.
             tier = 8.5
         else:
             tier = 6
@@ -371,7 +408,10 @@ def score_option(obs, sel, option):
         return (tier, card_value(card))
     if t in (OPT_ATTACH, OPT_ENERGY):
         in_play_index = option.get("inPlayIndex", 0)
-        base = 40.0 - float(in_play_index)  # prefer active, then low bench slots
+        if in_play_has_max_energy(obs, in_play_index):
+            base = 10.0 - float(in_play_index)  # already maxed out; spread energy elsewhere instead
+        else:
+            base = 40.0 - float(in_play_index)  # prefer active, then low bench slots
         hand_card = resolve_card_by_area(obs, sel, option.get("area", AREA_HAND), option.get("index"))
         target_card = CARD_DB.get(resolve_inplay_id(obs, in_play_index))
         if hand_card and target_card and hand_card.get("energyType") == target_card.get("energyType"):
