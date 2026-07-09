@@ -278,6 +278,25 @@ def bench_is_thin(obs):
         return False
 
 
+def hand_has_pokemon(obs):
+    """True when our hand currently holds at least one Basic Pokemon --
+    the only kind that can go straight onto an empty bench slot (an
+    evolution card in hand needs a Basic already in play first, so it
+    doesn't help here). Real replays showed losses where the bench never
+    got going because no *playable* Pokemon showed up in hand -- this flags
+    that specific dead end so a big-draw Supporter can be prioritized over
+    topping off energy instead."""
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        hand = p.get("hand") or []
+        return any(CARD_DB.get(c.get("id"), {}).get("basic") for c in hand)
+    except Exception:
+        return False
+
+
 def opponent_underprepared(obs):
     """True when the opponent's active has no energy attached and their
     bench is empty -- a rough "they haven't set up yet" signal. Worth
@@ -329,6 +348,10 @@ def score_option(obs, sel, option):
       so attack more" override was tried and measurably made things worse in
       self-play here -- this deck's plan is a slow evolution into a big
       attacker, so being behind means "catch up on energy," not "swing now.")
+    - a big-draw Supporter beats attaching energy when the bench is thin and
+      no Pokemon is in hand to put on it (see `hand_has_pokemon`) -- digging
+      for a body to play is more urgent than energy that has nowhere new to
+      go yet.
 
     A "stop stacking energy on an already-maxed attacker, spread it to the
     bench instead" override was also tried (replays visibly showed a 4th/5th
@@ -375,7 +398,13 @@ def score_option(obs, sel, option):
         card = resolve_card_by_area(obs, sel, AREA_HAND, option.get("index"))
         is_bench_pokemon = card and card.get("cardType") == 0
         urgent = is_bench_pokemon and (bench_is_thin(obs) or active_in_danger(obs))
-        tier = 10 if urgent else 7
+        text = " ".join(s.get("text", "") for s in (card.get("skills") or [])).lower() if card else ""
+        # No Pokemon in hand with a thin bench is the exact dead end that
+        # cost us games in replay review -- dig for one with a big draw
+        # card before spending the turn on energy that won't have anywhere
+        # new to go.
+        digging = "draw" in text and bench_is_thin(obs) and not hand_has_pokemon(obs)
+        tier = 10 if urgent else (8.6 if digging else 7)
         return (tier, card_value(card))
     if t in (OPT_ATTACH, OPT_ENERGY):
         in_play_index = option.get("inPlayIndex", 0)
