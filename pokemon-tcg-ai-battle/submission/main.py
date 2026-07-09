@@ -159,6 +159,14 @@ def card_value(card):
     evolve target) and, inverted, to pick the *worst* card (discard)."""
     if not card:
         return 0.0
+    if card.get("cardType") in (5, 6):  # Basic/Special Energy
+        # A real match replay showed a discard choice give up a Snover (a
+        # scarce evolution-line piece) to keep a Supporter, while a spare
+        # Basic Energy sat in the "keep" pile -- the deck runs 33 copies of
+        # it, so any single one is nearly free to discard. Score it clearly
+        # below every Pokemon and every other trainer so it's always
+        # discarded first when it's an option at all.
+        return 2.0
     if card.get("cardType") == 0:  # Pokemon
         val = (card.get("hp") or 0) / 10.0
         if card.get("megaEx"):
