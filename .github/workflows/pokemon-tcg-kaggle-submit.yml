@@ -1,0 +1,52 @@
+name: pokemon-tcg-ai-battle Kaggle submit
+
+# Manual trigger only -- the competition caps submissions (reportedly 5/day,
+# best 2 scored), so this intentionally does NOT run on every push. Click
+# "Run workflow" on the Actions tab when you actually want to submit.
+#
+# One-time setup: add repo secrets KAGGLE_USERNAME and KAGGLE_KEY
+# (Settings -> Secrets and variables -> Actions), values from a token
+# created at https://www.kaggle.com/settings -> API -> Create New Token.
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Submission message (optional)"
+        required: false
+        default: ""
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pokemon-tcg-ai-battle
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt kaggle
+
+      - name: Sanity-check the agent before spending a submission slot
+        run: python -m pytest tests/ -v
+
+      - name: Configure Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Submit
+        run: |
+          MSG="${{ inputs.message }}"
+          bash tools/kaggle_submit.sh "${MSG:-CI submit $(git rev-parse --short HEAD)}"
+
+      - name: Check status and leaderboard
+        run: bash tools/kaggle_status.sh | tee "$GITHUB_STEP_SUMMARY"

@@ -47,8 +47,13 @@ pokemon-tcg-ai-battle/
 │   ├── main.py        # 提出用エージェント本体（自己完結）
 │   └── deck.csv        # 提出用デッキ（60枚）
 ├── tools/
-│   ├── evaluate.py      # 実エンジンでの自己対戦・勝率計測CLI
-│   └── build_deck.py    # デッキ案のA/Bテスト（deck.csv の選定根拠を再現）
+│   ├── evaluate.py             # 実エンジンでの自己対戦・勝率計測CLI
+│   ├── build_deck.py           # デッキ案のA/Bテスト（deck.csv の選定根拠を再現）
+│   ├── kaggle_submit.sh        # submission/ をzip化してKaggleに提出
+│   ├── kaggle_status.sh        # 提出履歴・リーダーボードを確認
+│   ├── build_kaggle_kernel.py  # main.pyを自己完結ノートブックに変換（Kaggle Notebook用）
+│   ├── kaggle_push_kernel.sh   # ↑をKaggleにpush（Kaggleのランタイムで実行）
+│   └── kaggle_kernel_status.sh # Kaggle Notebookの実行結果を確認・ダウンロード
 ├── tests/
 │   └── test_policy.py   # 実エンジンでのクラッシュ・不正選択防止テスト（pytest）
 ├── notebooks/
@@ -56,8 +61,13 @@ pokemon-tcg-ai-battle/
 │   └── 02_agent_evaluation.ipynb   # デッキ比較・勝率検証（実行済み）
 ├── docs/
 │   └── ENGINE_NOTES.md  # obs/action スキーマのリバースエンジニアリング結果
-├── SUBMISSION.md         # Kaggle提出手順
+├── SUBMISSION.md         # Kaggle提出手順（CLI・Kaggle Notebook・GitHub Actions）
 └── requirements.txt
+
+../.github/workflows/
+├── pokemon-tcg-ci.yml                # push/PRで自動: 実エンジンでのテスト・勝率計測
+├── pokemon-tcg-kaggle-submit.yml     # 手動実行: テスト→Kaggle提出→結果をジョブサマリーに表示
+└── pokemon-tcg-kaggle-kernel.yml     # 手動実行: Kaggle Notebookのpush→ステータス確認
 ```
 
 ## 使い方
@@ -82,6 +92,12 @@ Jupyter Notebook を再実行する場合（`notebooks/` から相対パスで `
 ```bash
 cd notebooks && jupyter nbconvert --to notebook --execute --inplace 01_card_pool_eda.ipynb 02_agent_evaluation.ipynb
 ```
+
+## Kaggleへの提出・結果確認・Kaggle Notebookでの実行
+
+Kaggle CLI (`kaggle competitions submit`) での提出、`kaggle kernels push` によるKaggle
+Notebook（Kaggleのランタイム上）での実行確認、GitHub Actionsでの「pushして自動テスト、
+ボタン一つで提出→結果確認」の自動化については [`SUBMISSION.md`](SUBMISSION.md) を参照。
 
 ## 参考
 
