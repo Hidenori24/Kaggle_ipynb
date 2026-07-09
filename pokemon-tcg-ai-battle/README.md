@@ -62,6 +62,7 @@ pokemon-tcg-ai-battle/
 ├── docs/
 │   └── ENGINE_NOTES.md  # obs/action スキーマのリバースエンジニアリング結果
 ├── SUBMISSION.md         # Kaggle提出手順（CLI・Kaggle Notebook・GitHub Actions）
+├── STRATEGY_REPORT.md    # 戦略トラック向けレポート（日本語・英語両方収録）
 └── requirements.txt
 
 ../.github/workflows/
@@ -98,6 +99,12 @@ cd notebooks && jupyter nbconvert --to notebook --execute --inplace 01_card_pool
 Kaggle CLI (`kaggle competitions submit`) での提出、`kaggle kernels push` によるKaggle
 Notebook（Kaggleのランタイム上）での実行確認、GitHub Actionsでの「pushして自動テスト、
 ボタン一つで提出→結果確認」の自動化については [`SUBMISSION.md`](SUBMISSION.md) を参照。
+
+## 戦略トラック向けレポート
+
+戦略トラック（Strategy Category）向けの、デッキ設計・エージェント戦略・検証結果・
+実戦データから見つけた具体的な改善点をまとめたレポートは
+[`STRATEGY_REPORT.md`](STRATEGY_REPORT.md)（日本語・英語両方収録）を参照。
 
 ## 参考
 
