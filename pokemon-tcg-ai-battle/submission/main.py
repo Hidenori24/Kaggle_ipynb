@@ -62,9 +62,9 @@ DECK_CSV_PATH = os.path.join(_HERE, "deck.csv")
 # time, we still submit a legal 60-card deck instead of instant-losing.
 # Kept in sync with deck.csv (see that file for card-by-card commentary).
 DEFAULT_DECK = (
-    [721] * 2 + [722] * 4 + [723] * 4
-    + [1092] * 1 + [1121] * 2 + [1145] * 2 + [1163] * 2 + [1219] * 4 + [1227] * 4 + [1262] * 2
-    + [3] * 33
+    [333] * 4 + [678] * 4
+    + [1086] * 4 + [1121] * 4 + [1219] * 4 + [1227] * 4 + [1182] * 4 + [1213] * 4 + [1163] * 4
+    + [6] * 24
 )
 
 

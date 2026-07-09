@@ -1,84 +1,98 @@
 # Pokemon TCG AI Battle - 60 card deck (one cardId per line, '#' = comment)
 #
-# "Mega Abomasnow ex" water-evolution deck. This is the sample deck bundled
-# with kaggle-environments (kaggle_environments/envs/cabt/cabt.py) -- we kept
-# it after empirically A/B-testing two custom-built alternatives (a flat
-# all-Colorless "Kangaskhan swarm" and a "Grimmsnarl ex" evolution deck)
-# against it with the real engine and losing both times (see
-# notebooks/02_agent_evaluation.ipynb and tools/build_deck.py). The win
-# condition here is: Snover (basic, cheap early attacks) buys time to evolve
-# into Mega Abomasnow ex (350 HP, 200 dmg for 3 Water energy + a same-turn
-# damage-reduction effect), backed by Kyogre as a second big basic attacker
-# and a search/draw trainer package to find the key evolution pieces.
+# "Mega Lucario ex" Fighting deck. Replaces the previous "Mega Abomasnow ex"
+# water-evolution deck after real ranked-ladder replay review (13 losses,
+# several mirror matches) showed two structural problems with that deck: it
+# only ran 10 Pokemon (Basics were just Kyogre x2 + Snover x4 = 6 copies),
+# so games repeatedly ended with an empty bench and no backup after the
+# active was KO'd; and multiple opponents were running clearly more
+# cost-efficient attackers (e.g. Dragapult ex: 200 dmg for 2 Energy plus
+# bench pressure, vs. our Frost Barrier's 200 dmg for 3).
 #
-# 721 x2  Kyogre (basic, 150 HP)
-# 722 x4  Snover (basic, 90 HP)
-# 723 x4  Mega Abomasnow ex (350 HP, evolves from Snover)
-# 1092 x1 Secret Box (item, search 4 trainer types)
-# 1121 x2 Ultra Ball (item, search a Pokemon)
-# 1145 x2 Mega Signal (item, search a Mega Evolution ex)
-# 1163 x2 Powerglass (tool, re-attach energy from discard)
-# 1219 x4 Team Rocket's Petrel (supporter, search a Trainer)
-# 1227 x4 Lillie's Determination (supporter, refill hand)
-# 1262 x2 Surfing Beach (stadium, free switch for Water Pokemon)
-# 3   x33 Basic {W} Energy
-721
-721
-722
-722
-722
-722
-723
-723
-723
-723
-1092
+# This deck was chosen from a wider survey of the card pool for attacks with
+# a high damage-per-Energy ratio, favoring a shallow evolution line (Basic
+# -> one evolution, same depth as the old Snover line, not a 3-stage line
+# like Dragapult ex) for piloting stability, and a single Energy type (all
+# Fighting) to keep energy-attach logic simple. Mega Lucario ex's own Aura
+# Jab attack also recycles discarded Fighting Energy back onto the bench,
+# which -- combined with Buddy-Buddy Poffin putting two more Basics onto the
+# bench for free -- directly targets the "empty bench" failure mode from
+# replay review. A/B-tested with the real engine against the old deck
+# (same agent logic on both sides): ~54-56% win rate over 350 games (see
+# tools/build_deck.py's mega_lucario_ex candidate).
+#
+# 333  x4  Riolu (basic, 70 HP, also a Buddy-Buddy Poffin target)
+# 678  x4  Mega Lucario ex (340 HP, evolves from Riolu; Aura Jab: 1 {F}
+#          Energy/130 dmg + reattaches discarded Energy to the bench; Mega
+#          Brave: 2 {F} Energy/270 dmg, can't be used again next turn)
+# 1086 x4  Buddy-Buddy Poffin (item, search up to 2 Basic Pokemon with
+#          <=70 HP straight onto the bench)
+# 1121 x4  Ultra Ball (item, search a Pokemon)
+# 1219 x4  Team Rocket's Petrel (supporter, search a Trainer)
+# 1227 x4  Lillie's Determination (supporter, refill hand)
+# 1182 x4  Boss's Orders (supporter, pull a specific Benched Pokemon into
+#          the Active Spot)
+# 1213 x4  Judge (supporter, both players shuffle hand into deck and draw 4
+#          -- disruption when we're ahead on cards)
+# 1163 x4  Powerglass (tool, re-attach energy from discard)
+# 6   x24  Basic {F} Energy
+333
+333
+333
+333
+678
+678
+678
+678
+1086
+1086
+1086
+1086
 1121
 1121
-1145
-1145
+1121
+1121
+1219
+1219
+1219
+1219
+1227
+1227
+1227
+1227
+1182
+1182
+1182
+1182
+1213
+1213
+1213
+1213
 1163
 1163
-1219
-1219
-1219
-1219
-1227
-1227
-1227
-1227
-1262
-1262
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
-3
+1163
+1163
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6
+6

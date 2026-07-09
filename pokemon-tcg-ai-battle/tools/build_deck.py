@@ -56,11 +56,30 @@ REFERENCE_DECK_LEAN = (
     + [3] * 23
 )
 
+# Candidate 5: a completely different archetype rather than a tweak of the
+# reference deck. Riolu (Basic, 70 HP -- also a Buddy-Buddy Poffin target)
+# into Mega Lucario ex (one evolution stage, same depth as the reference
+# deck's Snover line, 340 HP). Both of Mega Lucario ex's attacks are
+# single-Fighting-type-only (Aura Jab: 1 Energy/130 dmg, and it recycles
+# discarded Energy onto the bench itself; Mega Brave: 2 Energy/270 dmg),
+# so unlike Hammer-lanche this deck has no payoff for running a huge energy
+# count -- Basic Energy is trimmed to a more conventional ~40% and the
+# difference spent on Buddy-Buddy Poffin (searches 2 Basic <=70 HP Pokemon
+# straight onto the bench -- a direct answer to the "empty bench, KO'd
+# active, instant loss" pattern seen repeatedly in replay review) plus
+# Boss's Orders / Judge for disruption.
+MEGA_LUCARIO_EX = (
+    [333] * 4 + [678] * 4
+    + [1086] * 4 + [1121] * 4 + [1219] * 4 + [1227] * 4 + [1182] * 4 + [1213] * 4 + [1163] * 4
+    + [6] * 24
+)
+
 CANDIDATES = {
     "kangaskhan_swarm": KANGASKHAN_SWARM,
     "grimmsnarl_ex": GRIMMSNARL_EX,
     "reference_abomasnow": REFERENCE_DECK,
     "reference_abomasnow_lean": REFERENCE_DECK_LEAN,
+    "mega_lucario_ex": MEGA_LUCARIO_EX,
 }
 
 
