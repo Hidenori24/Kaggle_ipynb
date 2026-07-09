@@ -120,7 +120,7 @@ play(first_agent, n=10)
     username = kaggle_username or detect_kaggle_username() or "REPLACE_WITH_YOUR_KAGGLE_USERNAME"
     metadata = {
         "id": f"{username}/pokemon-tcg-ai-battle-agent",
-        "title": "Pokemon TCG AI Battle - Agent + Self-Play Check",
+        "title": "Pokemon TCG AI Battle Agent",
         "code_file": "notebook.ipynb",
         "language": "python",
         "kernel_type": "notebook",
