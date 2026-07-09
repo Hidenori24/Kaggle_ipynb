@@ -17,6 +17,7 @@ Design goals (see ../docs/ENGINE_NOTES.md for the reverse-engineered `obs` schem
 import ctypes
 import json
 import os
+import re
 
 # ---------------------------------------------------------------------------
 # Card / attack database (loaded once from the native engine shipped inside
@@ -76,6 +77,24 @@ def load_deck():
     except Exception:
         pass
     return list(DEFAULT_DECK)
+
+
+def _own_deck_energy_ratio():
+    """Fraction of our own deck that's Basic/Special Energy. Used to
+    estimate the payoff of "discard N, deal X per Energy discarded"
+    attacks (see attack_score) -- computed once at import time since the
+    deck doesn't change mid-match."""
+    try:
+        deck = load_deck()
+        if not deck:
+            return 0.0
+        energy_count = sum(1 for cid in deck if CARD_DB.get(cid, {}).get("cardType") in (5, 6))
+        return energy_count / len(deck)
+    except Exception:
+        return 0.0
+
+
+OWN_DECK_ENERGY_RATIO = _own_deck_energy_ratio()
 
 
 # ---------------------------------------------------------------------------
@@ -218,9 +237,32 @@ def cheap_reliable_damage(card):
     return best
 
 
+_DISCARD_ENERGY_DAMAGE_RE = re.compile(
+    r"discard the top (\d+) cards.*?(\d+) damage for each (?:basic )?\{?\w*\}?\s*energy", re.IGNORECASE
+)
+
+
+def _expected_discard_damage(text):
+    """Some attacks read `damage: 0` in the raw data but their effect text
+    describes a real conditional payoff -- e.g. Mega Abomasnow ex's
+    Hammer-lanche ("discard the top 6 cards of your deck, 100 damage for
+    each Basic Energy discarded"). A real match replay showed an opponent
+    using this exact attack for 300-500 damage per hit every turn while our
+    agent never once selected it, since attack_score only ever looked at
+    the flat `damage` field. This estimates the payoff from our own deck's
+    energy density instead of silently treating it as zero."""
+    m = _DISCARD_ENERGY_DAMAGE_RE.search(text or "")
+    if not m:
+        return 0.0
+    n_cards, per_energy = int(m.group(1)), int(m.group(2))
+    return n_cards * OWN_DECK_ENERGY_RATIO * per_energy
+
+
 def attack_score(obs, attack_id):
     atk = ATTACK_DB.get(attack_id)
     dmg = (atk.get("damage") if atk else 0) or 0
+    if atk and dmg == 0:
+        dmg = _expected_discard_damage(atk.get("text"))
     score = 60.0 + dmg / 5.0
     opp_hp = get_opponent_active_hp(obs)
     if opp_hp is not None and opp_hp > 0 and dmg >= opp_hp:
