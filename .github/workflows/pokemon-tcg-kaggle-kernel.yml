@@ -1,0 +1,46 @@
+name: pokemon-tcg-ai-battle Kaggle kernel push
+
+# Manual trigger. Pushes a self-contained Kaggle Notebook mirror of
+# submission/main.py so it runs on Kaggle's own infrastructure (see
+# tools/build_kaggle_kernel.py). This does NOT consume a competition
+# submission slot -- it's for sanity-checking the agent on Kaggle's runtime,
+# or as a base for the Strategy-track write-up.
+#
+# One-time setup: same KAGGLE_USERNAME / KAGGLE_KEY secrets as the submit
+# workflow, and set the `id` field in kaggle_kernel/kernel-metadata.json
+# to "<your-kaggle-username>/pokemon-tcg-ai-battle-agent" the first time
+# (or just run tools/build_kaggle_kernel.py, which auto-fills it locally
+# if ~/.kaggle/kaggle.json is already configured).
+on:
+  workflow_dispatch:
+
+jobs:
+  push-kernel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pokemon-tcg-ai-battle
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt kaggle
+
+      - name: Configure Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Build and push kernel
+        run: bash tools/kaggle_push_kernel.sh
+
+      - name: Kernel status (execution runs async on Kaggle -- re-run this workflow or tools/kaggle_kernel_status.sh later for final output)
+        run: sleep 20 && bash tools/kaggle_kernel_status.sh | tee "$GITHUB_STEP_SUMMARY"

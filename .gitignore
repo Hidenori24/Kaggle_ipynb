@@ -4,3 +4,8 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 *.egg-info/
+
+# Kaggle: local credentials and generated/build artifacts, never commit these
+kaggle.json
+pokemon-tcg-ai-battle/submission.zip
+pokemon-tcg-ai-battle/kaggle_kernel/
