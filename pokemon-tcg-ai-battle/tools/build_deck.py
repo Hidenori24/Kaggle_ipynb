@@ -43,10 +43,24 @@ GRIMMSNARL_EX = (
 # Mega Abomasnow ex) backed by Kyogre as a second big basic attacker.
 REFERENCE_DECK = list(cabtmod.deck)
 
+# Candidate 4: same card pool as REFERENCE_DECK, but every non-energy card
+# maxed out to its 4-copy limit (Secret Box stays at 1 -- it's an ACE SPEC,
+# capped at one per deck by the engine) and the difference trimmed off Basic
+# Energy. REFERENCE_DECK runs 33/60 (55%) energy against only 10 Pokemon --
+# replay review showed games where we never saw a second Pokemon to bench
+# all game, which a lower energy count / higher Pokemon-and-trainer density
+# should reduce. No new cards, just recounting the same pool.
+REFERENCE_DECK_LEAN = (
+    [721] * 4 + [722] * 4 + [723] * 4
+    + [1092] * 1 + [1121] * 4 + [1145] * 4 + [1163] * 4 + [1219] * 4 + [1227] * 4 + [1262] * 4
+    + [3] * 23
+)
+
 CANDIDATES = {
     "kangaskhan_swarm": KANGASKHAN_SWARM,
     "grimmsnarl_ex": GRIMMSNARL_EX,
     "reference_abomasnow": REFERENCE_DECK,
+    "reference_abomasnow_lean": REFERENCE_DECK_LEAN,
 }
 
 
