@@ -247,6 +247,37 @@ def retreat_score(obs):
         return 10.0
 
 
+def bench_is_thin(obs):
+    """True when our bench has 0-1 Pokemon. A KO'd active with no backup on
+    the bench is an instant loss, so in this state getting another body onto
+    the field outweighs the usual evolve/attach priorities."""
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        return len(p.get("bench") or []) <= 1
+    except Exception:
+        return False
+
+
+def opponent_underprepared(obs):
+    """True when the opponent's active has no energy attached and their
+    bench is empty -- a rough "they haven't set up yet" signal. Worth
+    punishing by attacking now rather than spending the turn on our own
+    setup, since they can't retaliate hard yet either."""
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        opp = cur["players"][1 - cur["yourIndex"]]
+        active = (opp.get("active") or [None])[0]
+        no_energy = not active or not active.get("energies")
+        return no_energy and not (opp.get("bench") or [])
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Option scoring
 # ---------------------------------------------------------------------------
@@ -258,6 +289,11 @@ def score_option(obs, sel, option):
     evolve > attach energy > play a card > attack > retreat > pass/end. Other
     contexts (deck search, discard, coin flip, ...) mostly present only one
     option type at a time, so only the tiebreak matters there.
+
+    Two situational overrides bump a tier out of that default order:
+    getting a Pokemon onto a too-thin bench beats everything (see
+    `bench_is_thin`), and attacking beats attaching energy once the
+    opponent looks unprepared to hit back (see `opponent_underprepared`).
     """
     t = option.get("type")
     ctx = sel.get("context")
@@ -284,10 +320,13 @@ def score_option(obs, sel, option):
     if t == OPT_YES:
         return (5, 1.0)
     if t == OPT_ATTACK:
-        return (6, attack_score(obs, option.get("attackId")))
+        tier = 8.5 if opponent_underprepared(obs) else 6
+        return (tier, attack_score(obs, option.get("attackId")))
     if t in (OPT_PLAY, OPT_ABILITY):
         card = resolve_card_by_area(obs, sel, AREA_HAND, option.get("index"))
-        return (7, card_value(card))
+        is_bench_pokemon = card and card.get("cardType") == 0
+        tier = 10 if (is_bench_pokemon and bench_is_thin(obs)) else 7
+        return (tier, card_value(card))
     if t in (OPT_ATTACH, OPT_ENERGY):
         in_play_index = option.get("inPlayIndex", 0)
         base = 40.0 - float(in_play_index)  # prefer active, then low bench slots
