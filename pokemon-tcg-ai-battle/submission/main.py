@@ -89,6 +89,8 @@ OPT_ENERGY, OPT_PLAY, OPT_ATTACH, OPT_EVOLVE, OPT_ABILITY = 6, 7, 8, 9, 10
 OPT_RETREAT, OPT_ATTACK, OPT_END = 12, 13, 14
 
 CTX_DISCARD = 8
+CTX_SETUP_ACTIVE = 1
+CTX_TO_ACTIVE = 4
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +159,14 @@ def card_value(card):
     evolve target) and, inverted, to pick the *worst* card (discard)."""
     if not card:
         return 0.0
+    if card.get("cardType") in (5, 6):  # Basic/Special Energy
+        # A real match replay showed a discard choice give up a Snover (a
+        # scarce evolution-line piece) to keep a Supporter, while a spare
+        # Basic Energy sat in the "keep" pile -- the deck runs 33 copies of
+        # it, so any single one is nearly free to discard. Score it clearly
+        # below every Pokemon and every other trainer so it's always
+        # discarded first when it's an option at all.
+        return 2.0
     if card.get("cardType") == 0:  # Pokemon
         val = (card.get("hp") or 0) / 10.0
         if card.get("megaEx"):
@@ -179,6 +189,33 @@ def card_value(card):
     if card.get("aceSpec"):
         val += 4.0
     return val
+
+
+def cheap_reliable_damage(card):
+    """Best damage among this Pokemon's low-cost (<=2 energy) attacks.
+
+    Several attacks have a nonzero `damage` field that reads as "free value"
+    but is actually conditional and near-always 0 in practice early game
+    (e.g. Kyogre's Riptide: "20 damage per Basic Water Energy in your
+    discard pile" -- 0 discard early on means 0 damage). Real match replays
+    showed our old active-Pokemon choice (highest HP/ex) picking exactly
+    such a dead early attacker over a Pokemon with a smaller but *actual*
+    guaranteed hit, costing several turns of zero board pressure. This
+    proxies for "will the cheapest attack actually do something on turn 1-2"
+    by looking only at the flat damage value, which is the one thing we can
+    read straight from AllAttack() without parsing effect text.
+    """
+    if not card or not card.get("attacks"):
+        return 0.0
+    best = 0.0
+    for aid in card["attacks"]:
+        atk = ATTACK_DB.get(aid)
+        if not atk:
+            continue
+        cost = len(atk.get("energies") or [])
+        if cost <= 2:
+            best = max(best, atk.get("damage") or 0)
+    return best
 
 
 def attack_score(obs, attack_id):
@@ -238,6 +275,11 @@ def score_option(obs, sel, option):
         val = card_value(card)
         if ctx == CTX_DISCARD:
             return (4, -val)  # discard the least useful card
+        if ctx in (CTX_SETUP_ACTIVE, CTX_TO_ACTIVE):
+            # The active slot attacks first and most often, so a Pokemon
+            # whose cheap attack is real damage beats one that's merely
+            # bigger on paper (see cheap_reliable_damage's docstring).
+            return (7, val * 0.5 + cheap_reliable_damage(card) * 1.5)
         return (7, val)  # search / switch-in / reveal: take the best card
     if t == OPT_YES:
         return (5, 1.0)
