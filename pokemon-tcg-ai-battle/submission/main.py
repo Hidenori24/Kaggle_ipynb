@@ -258,11 +258,44 @@ def _expected_discard_damage(text):
     return n_cards * OWN_DECK_ENERGY_RATIO * per_energy
 
 
+_DISCARD_PILE_ENERGY_DAMAGE_RE = re.compile(
+    r"(\d+) damage for each (?:basic )?\{?\w*\}?\s*energy card in your discard pile", re.IGNORECASE
+)
+
+
+def _discard_pile_damage(obs, text):
+    """Kyogre's Riptide ("20 damage for each Basic Water Energy card in
+    your discard pile") also reads `damage: 0` in the raw data, but unlike
+    Hammer-lanche this scales with a number we can count exactly from
+    `obs` right now rather than estimate -- our own discard pile. A real
+    match replay showed us using this attack 61 times while still treating
+    it as zero-damage in the scoring, missing how much stronger it gets as
+    the game goes on and energy piles up in the discard. Returns None (not
+    0.0) when the text doesn't match, so callers can fall back to other
+    damage-estimation patterns instead of assuming zero."""
+    m = _DISCARD_PILE_ENERGY_DAMAGE_RE.search(text or "")
+    if not m:
+        return None
+    per_energy = int(m.group(1))
+    cur = obs.get("current")
+    if not cur:
+        return 0.0
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        discard = p.get("discard") or []
+        energy_count = sum(1 for c in discard if CARD_DB.get(c.get("id"), {}).get("cardType") in (5, 6))
+        return energy_count * per_energy
+    except Exception:
+        return 0.0
+
+
 def attack_score(obs, attack_id):
     atk = ATTACK_DB.get(attack_id)
     dmg = (atk.get("damage") if atk else 0) or 0
     if atk and dmg == 0:
-        dmg = _expected_discard_damage(atk.get("text"))
+        text = atk.get("text")
+        discard_pile_dmg = _discard_pile_damage(obs, text)
+        dmg = discard_pile_dmg if discard_pile_dmg is not None else _expected_discard_damage(text)
     score = 60.0 + dmg / 5.0
     opp_hp = get_opponent_active_hp(obs)
     if opp_hp is not None and opp_hp > 0 and dmg >= opp_hp:
