@@ -1,0 +1,5 @@
+# Pin to the version this project was developed and tested against; the
+# competition's `cabt` engine is a compiled native library bundled inside
+# this package, so the exact version matters more than for a typical dep.
+kaggle-environments==1.30.1
+pytest>=7.0

@@ -1,0 +1,333 @@
+"""Pokemon TCG AI Battle — rule-based agent.
+
+Kaggle simulation entry point. Must define `agent(obs: dict) -> list[int]`.
+
+Design goals (see ../docs/ENGINE_NOTES.md for the reverse-engineered `obs` schema):
+  1. Never crash and never return an illegal selection — a crash or timeout is an
+     instant loss, so every code path funnels through a defensive fallback.
+  2. Prefer decisions driven by the real card database (`AllCard`/`AllAttack`,
+     exposed by the native engine bundled in `kaggle-environments`) over blind
+     heuristics, but degrade gracefully if that database can't be loaded.
+  3. Reason primarily on `option[i]["type"]` (OptionType) rather than
+     `select["context"]` (SelectContext), since only a subset of context codes
+     could be identified empirically — the option type is what determines which
+     concrete action is being offered, in every context we observed.
+"""
+
+import ctypes
+import json
+import os
+
+# ---------------------------------------------------------------------------
+# Card / attack database (loaded once from the native engine shipped inside
+# kaggle-environments; the exact same library Kaggle runs submissions against).
+# ---------------------------------------------------------------------------
+
+CARD_DB = {}
+ATTACK_DB = {}
+
+
+def _load_card_db():
+    global CARD_DB, ATTACK_DB
+    try:
+        from kaggle_environments.envs.cabt.cg.sim import lib
+
+        lib.AllCard.restype = ctypes.c_char_p
+        lib.AllAttack.restype = ctypes.c_char_p
+        CARD_DB = {c["cardId"]: c for c in json.loads(lib.AllCard())}
+        ATTACK_DB = {a["attackId"]: a for a in json.loads(lib.AllAttack())}
+    except Exception:
+        CARD_DB = {}
+        ATTACK_DB = {}
+
+
+_load_card_db()
+
+# ---------------------------------------------------------------------------
+# Deck loading
+# ---------------------------------------------------------------------------
+
+DECK_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deck.csv")
+
+# Safety net baked in directly: if deck.csv is missing/corrupted at submission
+# time, we still submit a legal 60-card deck instead of instant-losing.
+# Kept in sync with deck.csv (see that file for card-by-card commentary).
+DEFAULT_DECK = (
+    [721] * 2 + [722] * 4 + [723] * 4
+    + [1092] * 1 + [1121] * 2 + [1145] * 2 + [1163] * 2 + [1219] * 4 + [1227] * 4 + [1262] * 2
+    + [3] * 33
+)
+
+
+def load_deck():
+    try:
+        with open(DECK_CSV_PATH, "r", encoding="utf-8") as f:
+            ids = [int(line.strip()) for line in f if line.strip() and not line.strip().startswith("#")]
+        if len(ids) == 60:
+            return ids
+    except Exception:
+        pass
+    return list(DEFAULT_DECK)
+
+
+# ---------------------------------------------------------------------------
+# Schema constants (see docs/ENGINE_NOTES.md)
+# ---------------------------------------------------------------------------
+
+AREA_DECK, AREA_HAND, AREA_DISCARD, AREA_INPLAY, AREA_BENCH = 1, 2, 3, 4, 5
+
+OPT_NUMBER, OPT_YES, OPT_NO, OPT_CARD = 0, 1, 2, 3
+OPT_ENERGY, OPT_PLAY, OPT_ATTACH, OPT_EVOLVE, OPT_ABILITY = 6, 7, 8, 9, 10
+OPT_RETREAT, OPT_ATTACK, OPT_END = 12, 13, 14
+
+CTX_DISCARD = 8
+
+
+# ---------------------------------------------------------------------------
+# Board-state helpers
+# ---------------------------------------------------------------------------
+
+def resolve_card_by_area(obs, sel, area, index, player_index=None):
+    """Best-effort lookup of the static card data behind a `{area, index}` ref."""
+    if area is None or index is None:
+        return None
+    try:
+        if area == AREA_DECK:
+            return CARD_DB.get(sel["deck"][index]["id"])
+        cur = obs.get("current")
+        if not cur:
+            return None
+        pi = player_index if player_index is not None else cur["yourIndex"]
+        p = cur["players"][pi]
+        if area == AREA_HAND:
+            hand = p.get("hand")
+            return CARD_DB.get(hand[index]["id"]) if hand else None
+        if area == AREA_DISCARD:
+            discard = p.get("discard") or []
+            return CARD_DB.get(discard[index]["id"]) if 0 <= index < len(discard) else None
+        if area == AREA_BENCH:
+            bench = p.get("bench") or []
+            return CARD_DB.get(bench[index]["id"]) if 0 <= index < len(bench) else None
+    except Exception:
+        return None
+    return None
+
+
+def resolve_inplay_id(obs, in_play_index, player_index=None):
+    """Card id of the Pokemon at in-play slot `in_play_index` (0=active, 1..5=bench)."""
+    cur = obs.get("current")
+    if not cur or in_play_index is None:
+        return None
+    try:
+        pi = player_index if player_index is not None else cur["yourIndex"]
+        p = cur["players"][pi]
+        if in_play_index == 0:
+            active = p.get("active") or []
+            return active[0]["id"] if active else None
+        bench = p.get("bench") or []
+        idx = in_play_index - 1
+        return bench[idx]["id"] if 0 <= idx < len(bench) else None
+    except Exception:
+        return None
+
+
+def get_opponent_active_hp(obs):
+    cur = obs.get("current")
+    if not cur:
+        return None
+    try:
+        opp = 1 - cur["yourIndex"]
+        active = cur["players"][opp].get("active") or []
+        return active[0]["hp"] if active else None
+    except Exception:
+        return None
+
+
+def card_value(card):
+    """Rough heuristic value of a card: bigger/rarer Pokemon and useful
+    trainers score higher. Used both to pick the *best* card (search, play,
+    evolve target) and, inverted, to pick the *worst* card (discard)."""
+    if not card:
+        return 0.0
+    if card.get("cardType") == 0:  # Pokemon
+        val = (card.get("hp") or 0) / 10.0
+        if card.get("megaEx"):
+            val += 25.0
+        elif card.get("ex"):
+            val += 15.0
+        if card.get("stage2"):
+            val += 5.0
+        elif card.get("stage1"):
+            val += 2.0
+        return val
+    text = " ".join(s.get("text", "") for s in (card.get("skills") or [])).lower()
+    val = 6.0
+    if card.get("cardType") == 3:  # Supporter
+        val += 2.0
+    if "search" in text:
+        val += 6.0
+    if "draw" in text:
+        val += 5.0
+    if card.get("aceSpec"):
+        val += 4.0
+    return val
+
+
+def attack_score(obs, attack_id):
+    atk = ATTACK_DB.get(attack_id)
+    dmg = (atk.get("damage") if atk else 0) or 0
+    score = 60.0 + dmg / 5.0
+    opp_hp = get_opponent_active_hp(obs)
+    if opp_hp is not None and opp_hp > 0 and dmg >= opp_hp:
+        score += 100.0  # lethal bonus
+    return score
+
+
+def retreat_score(obs):
+    cur = obs.get("current")
+    if not cur:
+        return 15.0
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        active = (p.get("active") or [None])[0]
+        if not active:
+            return 15.0
+        max_hp = active.get("maxHp") or 1
+        hp_ratio = active.get("hp", max_hp) / max_hp
+        bench = p.get("bench") or []
+        if hp_ratio < 0.35 and bench:
+            return 45.0  # worth retreating a nearly-dead attacker
+        return 5.0
+    except Exception:
+        return 10.0
+
+
+# ---------------------------------------------------------------------------
+# Option scoring
+# ---------------------------------------------------------------------------
+
+def score_option(obs, sel, option):
+    """Returns a (tier, tiebreak) tuple; higher sorts first.
+
+    Tiers encode the intended sequencing within a single MAIN-context turn:
+    evolve > attach energy > play a card > attack > retreat > pass/end. Other
+    contexts (deck search, discard, coin flip, ...) mostly present only one
+    option type at a time, so only the tiebreak matters there.
+    """
+    t = option.get("type")
+    ctx = sel.get("context")
+
+    if t == OPT_END:
+        return (0, 0.0)
+    if t == OPT_NO:
+        return (1, 0.0)
+    if t == OPT_NUMBER:
+        return (2, float(option.get("number") or 0))
+    if t == OPT_RETREAT:
+        return (3, retreat_score(obs))
+    if t == OPT_CARD:
+        card = resolve_card_by_area(obs, sel, option.get("area"), option.get("index"), option.get("playerIndex"))
+        val = card_value(card)
+        if ctx == CTX_DISCARD:
+            return (4, -val)  # discard the least useful card
+        return (7, val)  # search / switch-in / reveal: take the best card
+    if t == OPT_YES:
+        return (5, 1.0)
+    if t == OPT_ATTACK:
+        return (6, attack_score(obs, option.get("attackId")))
+    if t in (OPT_PLAY, OPT_ABILITY):
+        card = resolve_card_by_area(obs, sel, AREA_HAND, option.get("index"))
+        return (7, card_value(card))
+    if t in (OPT_ATTACH, OPT_ENERGY):
+        in_play_index = option.get("inPlayIndex", 0)
+        base = 40.0 - float(in_play_index)  # prefer active, then low bench slots
+        hand_card = resolve_card_by_area(obs, sel, option.get("area", AREA_HAND), option.get("index"))
+        target_card = CARD_DB.get(resolve_inplay_id(obs, in_play_index))
+        if hand_card and target_card and hand_card.get("energyType") == target_card.get("energyType"):
+            base += 5.0
+        return (8, base)
+    if t == OPT_EVOLVE:
+        hand_card = resolve_card_by_area(obs, sel, option.get("area", AREA_HAND), option.get("index"))
+        target_card = CARD_DB.get(resolve_inplay_id(obs, option.get("inPlayIndex")))
+        gain = card_value(hand_card) - card_value(target_card)
+        return (9, 50.0 + gain)
+    return (1, 0.0)
+
+
+def decide(obs):
+    sel = obs.get("select")
+    if sel is None:
+        return load_deck()
+
+    options = sel.get("option") or []
+    n = len(options)
+    if n == 0:
+        return []
+
+    min_c = sel.get("minCount") or 0
+    max_c = max(sel.get("maxCount") or 0, min_c)
+
+    scored = sorted(range(n), key=lambda i: score_option(obs, sel, options[i]), reverse=True)
+
+    if max_c <= min_c:
+        k = min_c
+    else:
+        top_tier, _ = score_option(obs, sel, options[scored[0]])
+        k = max_c if top_tier >= 5 else min_c  # only "opt in" to optional picks when worthwhile
+
+    k = max(min_c, min(max_c, k, n))
+    return scored[:k]
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+def _fallback(obs):
+    sel = obs.get("select")
+    if sel is None:
+        return load_deck()
+    try:
+        n = len(sel.get("option") or [])
+        min_c = sel.get("minCount") or 0
+        max_c = min(sel.get("maxCount") or 0, n)
+        k = min(max(min_c, max_c if max_c >= min_c else min_c), n)
+        return list(range(k))
+    except Exception:
+        return []
+
+
+def agent(obs):
+    try:
+        sel = obs.get("select")
+        result = decide(obs)
+
+        if sel is None:
+            return result if isinstance(result, list) and len(result) == 60 else load_deck()
+
+        n = len(sel.get("option") or [])
+        min_c = sel.get("minCount") or 0
+        max_c = min(sel.get("maxCount") or 0, n)
+
+        if not isinstance(result, list):
+            raise ValueError("agent produced a non-list result")
+
+        seen = set()
+        clean = []
+        for i in result:
+            if isinstance(i, int) and 0 <= i < n and i not in seen:
+                seen.add(i)
+                clean.append(i)
+
+        if len(clean) < min_c:
+            for i in range(n):
+                if i not in seen:
+                    clean.append(i)
+                    seen.add(i)
+                if len(clean) >= min_c:
+                    break
+        if len(clean) > max_c:
+            clean = clean[:max_c]
+        return clean
+    except Exception:
+        return _fallback(obs)
