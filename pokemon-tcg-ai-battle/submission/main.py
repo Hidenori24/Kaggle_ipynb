@@ -228,6 +228,25 @@ def attack_score(obs, attack_id):
     return score
 
 
+def active_in_danger(obs):
+    """True when our active Pokemon is below 35% HP. Extracted from what
+    used to be retreat_score's inline threshold so other decisions (bench
+    priority, retreat priority) can react to the same "about to lose this
+    Pokemon" signal instead of each re-deriving it."""
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        active = (p.get("active") or [None])[0]
+        if not active:
+            return False
+        max_hp = active.get("maxHp") or 1
+        return active.get("hp", max_hp) / max_hp < 0.35
+    except Exception:
+        return False
+
+
 def retreat_score(obs):
     cur = obs.get("current")
     if not cur:
@@ -237,10 +256,8 @@ def retreat_score(obs):
         active = (p.get("active") or [None])[0]
         if not active:
             return 15.0
-        max_hp = active.get("maxHp") or 1
-        hp_ratio = active.get("hp", max_hp) / max_hp
         bench = p.get("bench") or []
-        if hp_ratio < 0.35 and bench:
+        if active_in_danger(obs) and bench:
             return 45.0  # worth retreating a nearly-dead attacker
         return 5.0
     except Exception:
@@ -278,6 +295,16 @@ def opponent_underprepared(obs):
         return False
 
 
+def attack_is_lethal(obs, attack_id):
+    """True when this attack's flat damage would KO the opponent's active
+    right now. Ending the exchange and banking a prize outranks any setup
+    move, so this is checked ahead of every other tier."""
+    atk = ATTACK_DB.get(attack_id)
+    dmg = (atk.get("damage") if atk else 0) or 0
+    opp_hp = get_opponent_active_hp(obs)
+    return opp_hp is not None and opp_hp > 0 and dmg >= opp_hp
+
+
 # ---------------------------------------------------------------------------
 # Option scoring
 # ---------------------------------------------------------------------------
@@ -290,10 +317,18 @@ def score_option(obs, sel, option):
     contexts (deck search, discard, coin flip, ...) mostly present only one
     option type at a time, so only the tiebreak matters there.
 
-    Two situational overrides bump a tier out of that default order:
-    getting a Pokemon onto a too-thin bench beats everything (see
-    `bench_is_thin`), and attacking beats attaching energy once the
-    opponent looks unprepared to hit back (see `opponent_underprepared`).
+    Several situational overrides bump a tier out of that default order,
+    checked roughly in order of urgency:
+    - a lethal attack (see `attack_is_lethal`) outranks everything -- there's
+      no setup worth doing instead of ending the exchange now.
+    - getting a Pokemon onto a too-thin bench, or saving a low-HP active by
+      retreating it (see `bench_is_thin` / `active_in_danger`), outranks
+      evolve/attach when we're at risk of a Pokemon down with no backup.
+    - attacking beats attaching energy once the opponent looks unprepared to
+      hit back (see `opponent_underprepared`). (A "we're behind on prizes,
+      so attack more" override was tried and measurably made things worse in
+      self-play here -- this deck's plan is a slow evolution into a big
+      attacker, so being behind means "catch up on energy," not "swing now.")
     """
     t = option.get("type")
     ctx = sel.get("context")
@@ -305,7 +340,8 @@ def score_option(obs, sel, option):
     if t == OPT_NUMBER:
         return (2, float(option.get("number") or 0))
     if t == OPT_RETREAT:
-        return (3, retreat_score(obs))
+        tier = 8.7 if active_in_danger(obs) else 3
+        return (tier, retreat_score(obs))
     if t == OPT_CARD:
         card = resolve_card_by_area(obs, sel, option.get("area"), option.get("index"), option.get("playerIndex"))
         val = card_value(card)
@@ -320,12 +356,18 @@ def score_option(obs, sel, option):
     if t == OPT_YES:
         return (5, 1.0)
     if t == OPT_ATTACK:
-        tier = 8.5 if opponent_underprepared(obs) else 6
+        if attack_is_lethal(obs, option.get("attackId")):
+            tier = 11
+        elif opponent_underprepared(obs):
+            tier = 8.5
+        else:
+            tier = 6
         return (tier, attack_score(obs, option.get("attackId")))
     if t in (OPT_PLAY, OPT_ABILITY):
         card = resolve_card_by_area(obs, sel, AREA_HAND, option.get("index"))
         is_bench_pokemon = card and card.get("cardType") == 0
-        tier = 10 if (is_bench_pokemon and bench_is_thin(obs)) else 7
+        urgent = is_bench_pokemon and (bench_is_thin(obs) or active_in_danger(obs))
+        tier = 10 if urgent else 7
         return (tier, card_value(card))
     if t in (OPT_ATTACH, OPT_ENERGY):
         in_play_index = option.get("inPlayIndex", 0)
