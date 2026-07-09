@@ -1,0 +1,84 @@
+# Pokemon TCG AI Battle - 60 card deck (one cardId per line, '#' = comment)
+#
+# "Mega Abomasnow ex" water-evolution deck. This is the sample deck bundled
+# with kaggle-environments (kaggle_environments/envs/cabt/cabt.py) -- we kept
+# it after empirically A/B-testing two custom-built alternatives (a flat
+# all-Colorless "Kangaskhan swarm" and a "Grimmsnarl ex" evolution deck)
+# against it with the real engine and losing both times (see
+# notebooks/02_agent_evaluation.ipynb and tools/build_deck.py). The win
+# condition here is: Snover (basic, cheap early attacks) buys time to evolve
+# into Mega Abomasnow ex (350 HP, 200 dmg for 3 Water energy + a same-turn
+# damage-reduction effect), backed by Kyogre as a second big basic attacker
+# and a search/draw trainer package to find the key evolution pieces.
+#
+# 721 x2  Kyogre (basic, 150 HP)
+# 722 x4  Snover (basic, 90 HP)
+# 723 x4  Mega Abomasnow ex (350 HP, evolves from Snover)
+# 1092 x1 Secret Box (item, search 4 trainer types)
+# 1121 x2 Ultra Ball (item, search a Pokemon)
+# 1145 x2 Mega Signal (item, search a Mega Evolution ex)
+# 1163 x2 Powerglass (tool, re-attach energy from discard)
+# 1219 x4 Team Rocket's Petrel (supporter, search a Trainer)
+# 1227 x4 Lillie's Determination (supporter, refill hand)
+# 1262 x2 Surfing Beach (stadium, free switch for Water Pokemon)
+# 3   x33 Basic {W} Energy
+721
+721
+722
+722
+722
+722
+723
+723
+723
+723
+1092
+1121
+1121
+1145
+1145
+1163
+1163
+1219
+1219
+1219
+1219
+1227
+1227
+1227
+1227
+1262
+1262
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
+3
