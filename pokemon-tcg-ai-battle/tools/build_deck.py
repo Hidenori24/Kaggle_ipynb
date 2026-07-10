@@ -74,6 +74,7 @@ MEGA_LUCARIO_EX = (
     + [6] * 24
 )
 
+<<<<<<< HEAD
 # Candidate 6: same Riolu -> Mega Lucario ex core as candidate 5, unchanged --
 # the goal here isn't a new archetype but raising how often we actually reach
 # that evolution. Real-ladder replay review of 5 fresh losses with candidate 5
@@ -100,13 +101,18 @@ MEGA_LUCARIO_EX_V2 = (
     + [6] * 24
 )
 
+=======
+>>>>>>> origin/main
 CANDIDATES = {
     "kangaskhan_swarm": KANGASKHAN_SWARM,
     "grimmsnarl_ex": GRIMMSNARL_EX,
     "reference_abomasnow": REFERENCE_DECK,
     "reference_abomasnow_lean": REFERENCE_DECK_LEAN,
     "mega_lucario_ex": MEGA_LUCARIO_EX,
+<<<<<<< HEAD
     "mega_lucario_ex_v2": MEGA_LUCARIO_EX_V2,
+=======
+>>>>>>> origin/main
 }
 
 
