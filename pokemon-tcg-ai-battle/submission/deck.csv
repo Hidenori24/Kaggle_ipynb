@@ -1,6 +1,5 @@
 # Pokemon TCG AI Battle - 60 card deck (one cardId per line, '#' = comment)
 #
-<<<<<<< HEAD
 # "Mega Lucario ex" Fighting deck, v2. Same Riolu -> Mega Lucario ex core as
 # the v1 deck (see git history for the switch away from the old "Mega
 # Abomasnow ex" water deck) -- this revision does not change the archetype,
@@ -35,28 +34,6 @@
 # then 80 more across seeds 4-5 to confirm it wasn't a fluke -- every single
 # seed individually favored this deck, 55-67% each). See
 # tools/build_deck.py's mega_lucario_ex_v2 candidate to reproduce.
-=======
-# "Mega Lucario ex" Fighting deck. Replaces the previous "Mega Abomasnow ex"
-# water-evolution deck after real ranked-ladder replay review (13 losses,
-# several mirror matches) showed two structural problems with that deck: it
-# only ran 10 Pokemon (Basics were just Kyogre x2 + Snover x4 = 6 copies),
-# so games repeatedly ended with an empty bench and no backup after the
-# active was KO'd; and multiple opponents were running clearly more
-# cost-efficient attackers (e.g. Dragapult ex: 200 dmg for 2 Energy plus
-# bench pressure, vs. our Frost Barrier's 200 dmg for 3).
-#
-# This deck was chosen from a wider survey of the card pool for attacks with
-# a high damage-per-Energy ratio, favoring a shallow evolution line (Basic
-# -> one evolution, same depth as the old Snover line, not a 3-stage line
-# like Dragapult ex) for piloting stability, and a single Energy type (all
-# Fighting) to keep energy-attach logic simple. Mega Lucario ex's own Aura
-# Jab attack also recycles discarded Fighting Energy back onto the bench,
-# which -- combined with Buddy-Buddy Poffin putting two more Basics onto the
-# bench for free -- directly targets the "empty bench" failure mode from
-# replay review. A/B-tested with the real engine against the old deck
-# (same agent logic on both sides): ~54-56% win rate over 350 games (see
-# tools/build_deck.py's mega_lucario_ex candidate).
->>>>>>> origin/main
 #
 # 333  x4  Riolu (basic, 70 HP, also a Buddy-Buddy Poffin target)
 # 678  x4  Mega Lucario ex (340 HP, evolves from Riolu; Aura Jab: 1 {F}
@@ -67,15 +44,8 @@
 # 1121 x4  Ultra Ball (item, search a Pokemon)
 # 1219 x4  Team Rocket's Petrel (supporter, search a Trainer)
 # 1227 x4  Lillie's Determination (supporter, refill hand)
-<<<<<<< HEAD
 # 1210 x4  Brock's Scouting (supporter, search 2 Basic or 1 Evolution Pokemon)
 # 1205 x4  Cyrano (supporter, search up to 3 Pokemon {ex})
-=======
-# 1182 x4  Boss's Orders (supporter, pull a specific Benched Pokemon into
-#          the Active Spot)
-# 1213 x4  Judge (supporter, both players shuffle hand into deck and draw 4
-#          -- disruption when we're ahead on cards)
->>>>>>> origin/main
 # 1163 x4  Powerglass (tool, re-attach energy from discard)
 # 6   x24  Basic {F} Energy
 333
@@ -102,7 +72,6 @@
 1227
 1227
 1227
-<<<<<<< HEAD
 1210
 1210
 1210
@@ -111,16 +80,6 @@
 1205
 1205
 1205
-=======
-1182
-1182
-1182
-1182
-1213
-1213
-1213
-1213
->>>>>>> origin/main
 1163
 1163
 1163
