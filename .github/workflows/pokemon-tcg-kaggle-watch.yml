@@ -4,8 +4,13 @@ name: pokemon-tcg-ai-battle Kaggle submission watch
 # workflow is the closest approximation: poll `kaggle competitions
 # submissions` on a schedule, and post a comment on the tracking Issue only
 # for results that haven't been reported yet (matched by a fingerprint of
-# the row, so a status/score change is treated as new -- see
-# tools/kaggle_watch.py). Also runnable manually to check right now.
+# the row, so a status/score change is treated as new). It also polls the
+# latest submission's individual match episodes (win/loss/draw, opponents,
+# errors) via the kagglesdk python client, since the public score alone
+# doesn't say much for this simulation-based competition -- see
+# tools/kaggle_watch.py. Any losses since the last check have their replay
+# JSON downloaded and attached to this run as a workflow artifact.
+# Also runnable manually to check right now.
 #
 # One-time setup: same KAGGLE_USERNAME / KAGGLE_KEY secrets as the other
 # Kaggle workflows. No new secrets needed -- issue comments use the
@@ -65,3 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
         run: python tools/kaggle_watch.py
+
+      - name: Upload any loss replay JSON as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-loss-replays-${{ github.run_id }}
+          path: pokemon-tcg-ai-battle/kaggle_replays/
+          if-no-files-found: ignore
+          retention-days: 30
