@@ -1,5 +1,41 @@
 # Pokemon TCG AI Battle - 60 card deck (one cardId per line, '#' = comment)
 #
+<<<<<<< HEAD
+# "Mega Lucario ex" Fighting deck, v2. Same Riolu -> Mega Lucario ex core as
+# the v1 deck (see git history for the switch away from the old "Mega
+# Abomasnow ex" water deck) -- this revision does not change the archetype,
+# it raises how often the deck actually reaches its own payoff card.
+#
+# Real ranked-ladder replay review of 5 fresh losses with the v1 deck showed
+# a pattern worse than piloting mistakes: several games never got an Ultra
+# Ball (or any other way) to find Riolu at all, let alone drew Mega Lucario
+# ex once a Riolu was on the bench. Opponent decks were not obviously more
+# efficient per-attack; we just weren't reaching our own deck's plan often
+# enough. Boss's Orders x4 and Judge x4 (pure disruption, no card search)
+# were swapped for two direct-search Supporters found by scanning the full
+# card pool for "search your deck for a Pokemon" effect text:
+#
+# 1210 x4  Brock's Scouting (supporter, search up to 2 Basic Pokemon OR 1
+#          Evolution Pokemon -- confirmed by direct simulation that it offers
+#          Mega Lucario ex as a target despite being a megaEx card, not a
+#          plain {ex}. Flexible: grabs a second/third Riolu early, or the
+#          evolution once a Riolu is already down.)
+# 1205 x4  Cyrano (supporter, search up to 3 Pokemon {ex} -- same megaEx
+#          inclusion confirmed by simulation. Only useful once a Riolu is
+#          already in play, since it can't fetch a Basic, but stacks extra
+#          copies of the evolution into hand fast once one is.)
+#
+# (Poke Pad was checked too and ruled out: its own effect text explicitly
+# excludes any Pokemon with a Rule Box, which covers ex/megaEx, so it can
+# never offer Mega Lucario ex.)
+#
+# A/B-tested with the real engine (same agent logic on both sides) as a
+# direct mirror match against the v1 deck across 5 random seeds: this
+# revision won 60.0% of 260 games (seeds 1-5; 180 games across seeds 1-3,
+# then 80 more across seeds 4-5 to confirm it wasn't a fluke -- every single
+# seed individually favored this deck, 55-67% each). See
+# tools/build_deck.py's mega_lucario_ex_v2 candidate to reproduce.
+=======
 # "Mega Lucario ex" Fighting deck. Replaces the previous "Mega Abomasnow ex"
 # water-evolution deck after real ranked-ladder replay review (13 losses,
 # several mirror matches) showed two structural problems with that deck: it
@@ -20,6 +56,7 @@
 # replay review. A/B-tested with the real engine against the old deck
 # (same agent logic on both sides): ~54-56% win rate over 350 games (see
 # tools/build_deck.py's mega_lucario_ex candidate).
+>>>>>>> origin/main
 #
 # 333  x4  Riolu (basic, 70 HP, also a Buddy-Buddy Poffin target)
 # 678  x4  Mega Lucario ex (340 HP, evolves from Riolu; Aura Jab: 1 {F}
@@ -30,10 +67,15 @@
 # 1121 x4  Ultra Ball (item, search a Pokemon)
 # 1219 x4  Team Rocket's Petrel (supporter, search a Trainer)
 # 1227 x4  Lillie's Determination (supporter, refill hand)
+<<<<<<< HEAD
+# 1210 x4  Brock's Scouting (supporter, search 2 Basic or 1 Evolution Pokemon)
+# 1205 x4  Cyrano (supporter, search up to 3 Pokemon {ex})
+=======
 # 1182 x4  Boss's Orders (supporter, pull a specific Benched Pokemon into
 #          the Active Spot)
 # 1213 x4  Judge (supporter, both players shuffle hand into deck and draw 4
 #          -- disruption when we're ahead on cards)
+>>>>>>> origin/main
 # 1163 x4  Powerglass (tool, re-attach energy from discard)
 # 6   x24  Basic {F} Energy
 333
@@ -60,6 +102,16 @@
 1227
 1227
 1227
+<<<<<<< HEAD
+1210
+1210
+1210
+1210
+1205
+1205
+1205
+1205
+=======
 1182
 1182
 1182
@@ -68,6 +120,7 @@
 1213
 1213
 1213
+>>>>>>> origin/main
 1163
 1163
 1163
