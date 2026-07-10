@@ -57,9 +57,13 @@ bash tools/kaggle_kernel_status.sh        # 実行ステータス確認 + 実行
 
 | ワークフロー | トリガー | 内容 |
 |---|---|---|
-| `pokemon-tcg-ci.yml` | push / PR（自動） | 実エンジンでのテスト・勝率計測 |
+| `pokemon-tcg-ci.yml` | push / PR（自動） | 実エンジンでのテスト・勝率計測（`test`ジョブ）＋ `notebooks/` が実際に最後まで実行できるかの検証（`notebooks`ジョブ、独立実行なので一方の失敗が他方を隠さない） |
 | `pokemon-tcg-kaggle-submit.yml` | 手動（Actionsタブから実行） | テスト→Kaggleへ提出→結果をジョブサマリーに表示 |
 | `pokemon-tcg-kaggle-kernel.yml` | 手動 | Kaggle Notebookのpush→ステータス確認 |
+
+`pip`の依存関係キャッシュ（`actions/setup-python`の`cache: pip`）を全ワークフローで有効化しているほか、
+`pokemon-tcg-ci.yml`は同じブランチ／PRへの新しいpushが来たら実行中の古いジョブを自動キャンセルする
+（`concurrency`設定）。
 
 提出系の2つはリポジトリの **Settings → Secrets and variables → Actions** に
 `KAGGLE_USERNAME` と `KAGGLE_KEY`（Kaggle APIトークンの中身）を登録すれば動く。

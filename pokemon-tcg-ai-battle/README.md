@@ -60,15 +60,18 @@ pokemon-tcg-ai-battle/
 │   ├── kaggle_push_kernel.sh   # ↑をKaggleにpush（Kaggleのランタイムで実行）
 │   └── kaggle_kernel_status.sh # Kaggle Notebookの実行結果を確認・ダウンロード
 ├── tests/
-│   └── test_policy.py   # 実エンジンでのクラッシュ・不正選択防止テスト（pytest）
+│   ├── test_policy.py      # 実エンジンでのクラッシュ・不正選択防止テスト（pytest）
+│   └── test_heuristics.py  # score_option()内の個別ロジック（bench_is_thin等）の単体テスト
 ├── notebooks/
 │   ├── 01_card_pool_eda.ipynb      # 実カードデータベースのEDA
 │   └── 02_agent_evaluation.ipynb   # デッキ比較・勝率検証（実行済み）
 ├── docs/
 │   └── ENGINE_NOTES.md  # obs/action スキーマのリバースエンジニアリング結果
+│                         # ＋実戦リプレイJSON解析のハマりどころ
 ├── SUBMISSION.md         # Kaggle提出手順（CLI・Kaggle Notebook・GitHub Actions）
 ├── STRATEGY_REPORT.md    # 戦略トラック向けレポート（日本語・英語両方収録）
-└── requirements.txt
+├── requirements.txt      # 提出物の実行に必要な最小限の依存
+└── requirements-dev.txt  # ＋ notebooks/ 再実行用（jupyter, matplotlib, pandas等）
 
 ../.github/workflows/
 ├── pokemon-tcg-ci.yml                # push/PRで自動: 実エンジンでのテスト・勝率計測
@@ -93,9 +96,10 @@ python tools/build_deck.py --games 20
 ```
 
 Jupyter Notebook を再実行する場合（`notebooks/` から相対パスで `submission/main.py` を
-読み込む想定）:
+読み込む想定。EDA・グラフ描画用の追加パッケージが必要）:
 
 ```bash
+pip install -r requirements-dev.txt
 cd notebooks && jupyter nbconvert --to notebook --execute --inplace 01_card_pool_eda.ipynb 02_agent_evaluation.ipynb
 ```
 
