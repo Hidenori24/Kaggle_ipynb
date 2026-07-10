@@ -63,7 +63,7 @@ DECK_CSV_PATH = os.path.join(_HERE, "deck.csv")
 # Kept in sync with deck.csv (see that file for card-by-card commentary).
 DEFAULT_DECK = (
     [333] * 4 + [678] * 4
-    + [1086] * 4 + [1121] * 4 + [1219] * 4 + [1227] * 4 + [1182] * 4 + [1213] * 4 + [1163] * 4
+    + [1086] * 4 + [1121] * 4 + [1219] * 4 + [1227] * 4 + [1210] * 4 + [1205] * 4 + [1163] * 4
     + [6] * 24
 )
 

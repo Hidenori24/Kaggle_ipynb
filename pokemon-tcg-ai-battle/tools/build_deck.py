@@ -74,12 +74,39 @@ MEGA_LUCARIO_EX = (
     + [6] * 24
 )
 
+# Candidate 6: same Riolu -> Mega Lucario ex core as candidate 5, unchanged --
+# the goal here isn't a new archetype but raising how often we actually reach
+# that evolution. Real-ladder replay review of 5 fresh losses with candidate 5
+# showed several games where we never even got an Ultra Ball to find Riolu,
+# let alone drew the evolution card once it was on the bench. Boss's Orders
+# and Judge (pure disruption, no search) are swapped for two direct-search
+# Supporters found by scanning the card pool for "search your deck for a
+# Pokemon" text:
+#   - Brock's Scouting: up to 2 Basic Pokemon OR 1 Evolution Pokemon --
+#     confirmed by direct simulation (see tools/build_deck.py's git history /
+#     STRATEGY_REPORT.md) that it offers Mega Lucario ex as a search target
+#     despite being a megaEx card, not just a plain {ex}. Flexible enough to
+#     either grab a second/third Riolu early or the evolution once Riolu is
+#     already down.
+#   - Cyrano: up to 3 Pokemon {ex} -- same megaEx-inclusion confirmed by
+#     simulation. Only useful once a Riolu is already in play (it can't fetch
+#     the Basic), but stacks extra evolution copies into hand fast.
+# (Poke Pad was checked too and ruled out: its own text explicitly excludes
+# any Pokemon with a Rule Box, which covers ex/megaEx, so it can never offer
+# Mega Lucario ex.)
+MEGA_LUCARIO_EX_V2 = (
+    [333] * 4 + [678] * 4
+    + [1086] * 4 + [1121] * 4 + [1219] * 4 + [1227] * 4 + [1210] * 4 + [1205] * 4 + [1163] * 4
+    + [6] * 24
+)
+
 CANDIDATES = {
     "kangaskhan_swarm": KANGASKHAN_SWARM,
     "grimmsnarl_ex": GRIMMSNARL_EX,
     "reference_abomasnow": REFERENCE_DECK,
     "reference_abomasnow_lean": REFERENCE_DECK_LEAN,
     "mega_lucario_ex": MEGA_LUCARIO_EX,
+    "mega_lucario_ex_v2": MEGA_LUCARIO_EX_V2,
 }
 
 
