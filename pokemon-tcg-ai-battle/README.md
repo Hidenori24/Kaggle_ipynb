@@ -81,7 +81,8 @@ pokemon-tcg-ai-battle/
 ../.github/workflows/
 ├── pokemon-tcg-ci.yml                # push/PRで自動: 実エンジンでのテスト・勝率計測
 ├── pokemon-tcg-kaggle-submit.yml     # 手動実行: テスト→Kaggle提出→結果をジョブサマリーに表示
-└── pokemon-tcg-kaggle-kernel.yml     # 手動実行: Kaggle Notebookのpush→ステータス確認
+├── pokemon-tcg-kaggle-kernel.yml     # 手動実行: Kaggle Notebookのpush→ステータス確認
+└── pokemon-tcg-kaggle-watch.yml      # 3時間おきに自動実行: 提出結果をポーリングしIssueに報告
 ```
 
 ## 使い方
