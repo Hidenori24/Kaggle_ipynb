@@ -1,0 +1,67 @@
+name: pokemon-tcg-ai-battle Kaggle submission watch
+
+# Kaggle has no push/webhook API for "your submission was scored" -- this
+# workflow is the closest approximation: poll `kaggle competitions
+# submissions` on a schedule, and post a comment on the tracking Issue only
+# for results that haven't been reported yet (matched by a fingerprint of
+# the row, so a status/score change is treated as new -- see
+# tools/kaggle_watch.py). Also runnable manually to check right now.
+#
+# One-time setup: same KAGGLE_USERNAME / KAGGLE_KEY secrets as the other
+# Kaggle workflows. No new secrets needed -- issue comments use the
+# workflow's own GITHUB_TOKEN.
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pokemon-tcg-ai-battle
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: pokemon-tcg-ai-battle/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt kaggle
+
+      - name: Configure Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Find or create the tracking issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NUMBER=$(gh issue list --repo "$GITHUB_REPOSITORY" --search "Kaggle submission watch in:title" --state open --json number --jq '.[0].number')
+          if [ -z "$NUMBER" ]; then
+            NUMBER=$(gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Kaggle submission watch" \
+              --body "Auto-updated by \`.github/workflows/pokemon-tcg-kaggle-watch.yml\`. Each comment below reports a submission status/score that was newly observed -- Kaggle itself has no push notification for this, so this issue is polled into existence instead." \
+              | grep -oE '[0-9]+$')
+            echo "Created tracking issue #$NUMBER"
+          fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Poll Kaggle and report new results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: python tools/kaggle_watch.py

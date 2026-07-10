@@ -53,13 +53,14 @@ bash tools/kaggle_kernel_status.sh        # 実行ステータス確認 + 実行
 
 ## GitHub Actionsでの自動化
 
-`.github/workflows/` に3つのワークフローがある。
+`.github/workflows/` に4つのワークフローがある。
 
 | ワークフロー | トリガー | 内容 |
 |---|---|---|
 | `pokemon-tcg-ci.yml` | push / PR（自動） | 実エンジンでのテスト・勝率計測（`test`ジョブ）＋ `notebooks/` が実際に最後まで実行できるかの検証（`notebooks`ジョブ、独立実行なので一方の失敗が他方を隠さない） |
 | `pokemon-tcg-kaggle-submit.yml` | 手動（Actionsタブから実行） | テスト→Kaggleへ提出→結果をジョブサマリーに表示 |
 | `pokemon-tcg-kaggle-kernel.yml` | 手動 | Kaggle Notebookのpush→ステータス確認 |
+| `pokemon-tcg-kaggle-watch.yml` | 3時間おき（自動）＋手動 | 提出結果をポーリングし、新しい結果だけをリポジトリの「Kaggle submission watch」Issueにコメントで報告 |
 
 `pip`の依存関係キャッシュ（`actions/setup-python`の`cache: pip`）を全ワークフローで有効化しているほか、
 `pokemon-tcg-ci.yml`は同じブランチ／PRへの新しいpushが来たら実行中の古いジョブを自動キャンセルする
@@ -70,6 +71,17 @@ bash tools/kaggle_kernel_status.sh        # 実行ステータス確認 + 実行
 1日あたりの提出回数制限があるため、`push`のたびに自動提出はされない設計にしている
 （意図的に手動トリガーのみ）。これで「pushしてActionsタブのボタンを押すだけで
 提出→結果確認まで完結する」環境になる。
+
+### 提出結果の自動監視（`pokemon-tcg-kaggle-watch.yml`）
+
+Kaggle APIには「提出が採点されたら通知する」という push型（Webhook）の仕組みは無く、
+`kaggle competitions submissions`を定期的にポーリングして状況を見に行くしかない。
+このワークフローは3時間おきに自動実行され、前回までに報告済みの結果（ステータス・スコアの
+組み合わせをフィンガープリント化してIssueコメントに埋め込んで判定、`tools/kaggle_watch.py`）
+と比較して、**新しい結果（新規提出、または pending→complete などの状態変化）だけ**を
+リポジトリの Issue「Kaggle submission watch」にコメントとして追加する。Issueが無ければ
+自動作成される。追加のSecret登録は不要（既存の`KAGGLE_USERNAME`/`KAGGLE_KEY`と、
+ワークフロー自身の`GITHUB_TOKEN`のみで動く）。
 
 ## 注意（本リポジトリの開発環境について）
 
