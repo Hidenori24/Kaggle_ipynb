@@ -133,7 +133,13 @@ def summarize_episodes(api, submission_ref, since_episode_id):
         opponents[opp_name] = opponents.get(opp_name, 0) + 1
 
         state_name = mine.state.name
-        if state_name != "EPISODE_AGENT_STATE_COMPLETE":
+        # In production, a cleanly-finished game reports the default/unset
+        # EPISODE_AGENT_STATE_UNSPECIFIED, not an explicit
+        # EPISODE_AGENT_STATE_COMPLETE (confirmed against the real API --
+        # the first batch of 20 live episodes were all UNSPECIFIED despite
+        # having sane win/loss rewards). Only the ERROR_* states mean the
+        # agent actually crashed/timed out/was disqualified.
+        if "ERROR" in state_name:
             error_counts[state_name] = error_counts.get(state_name, 0) + 1
 
         reward = mine.reward if mine.reward is not None else 0
