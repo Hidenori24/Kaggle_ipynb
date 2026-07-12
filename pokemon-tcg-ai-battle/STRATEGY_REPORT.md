@@ -412,6 +412,19 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
   分裂——ノイズと区別できなかった。理由は単純で、このデッキのMega Lucario exは
   Aura Jab（1エネルギー）・Mega Brave（2エネルギー）のどちらも要求エネルギーが非常に
   少なく、そもそも「使い切れないほどエネルギーを積む」機会自体が稀だったため。**不採用**。
+- **`active_in_danger`の35%固定閾値を、相手の実際の即死圏判定に置き換える**: Mega Brave
+  （270ダメージ、2エネルギー）は自分自身の最大HP340の35%（119）よりずっと高い、HP120〜269
+  という広い範囲で「まだ安全」と誤判定してしまう構造的なギャップがあると気づいた。
+  `opponent_can_lethal_us()`——相手のアクティブが今すぐ払える技（現在の付着エネルギー数で
+  判定）のうち、こちらのHPを超えるダメージを出せる技が1つでもあるかを直接計算するヘルパー
+  ——を追加し、`active_in_danger`の判定に「35%未満」とのOR条件で組み込んだ。600戦
+  （1回の継続実行、6バッチ）のA/Bテストの結果は旧50.7%・新49.3%で、6バッチ中3対3の
+  分裂——理屈は正しいはずだが、実測ではノイズと区別できなかった。考えられる原因は2つ:
+  (1) まだ十分健康な状態で早期に逃げること自体に「その分攻撃・進化が遅れる」という機会損失が
+  あり、理論上の危険回避のメリットを相殺してしまった。(2) Mega Braveは「使った次の番は
+  使えない」という自己制限があるが、`opponent_can_lethal_us()`はこの制限を見ておらず、
+  実際には撃てない一時的な見せかけの脅威を検知してしまうケースがあった可能性がある。
+  **不採用**。
 
 ## 7. 現状と今後の課題
 
@@ -823,6 +836,19 @@ We record them here so they aren't retried blind.
   across batches — indistinguishable from noise. The likely reason: both of Mega Lucario ex's
   attacks are cheap (1-2 Energy), so the "energy already maxed out on one attacker" scenario this
   fix targets is simply rare for this specific deck. **Rejected.**
+- **Replace `active_in_danger`'s flat 35%-HP threshold with an exact "opponent has a lethal
+  attack ready right now" check**: Mega Brave (270 damage, 2 Energy) exposes a real structural
+  gap — 35% of its own 340 max HP is only 119, so anything sitting at 120-269 HP reads as "safe"
+  under the old threshold while a 2-Energy-loaded opponent Mega Lucario ex would still one-shot
+  it. Added `opponent_can_lethal_us()` — checks every attack the opponent's active already has
+  enough Energy to pay for right now against our current HP — and OR'd it into `active_in_danger`.
+  A 600-game single continuous A/B run (6 batches) came back at old 50.7% vs fix 49.3%, split 3-3
+  across batches — the reasoning was sound but didn't translate into a measured improvement.
+  Two plausible reasons: (1) retreating pre-emptively while still fairly healthy has its own
+  opportunity cost (that turn doesn't attack or evolve), which may have offset the theoretical
+  safety gain; (2) Mega Brave carries a self-imposed "can't use it again next turn" restriction
+  that `opponent_can_lethal_us()` doesn't check for, so it can flag a threat that isn't actually
+  available yet. **Rejected.**
 
 ## 7. Current Standing and Future Work
 
