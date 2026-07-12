@@ -172,6 +172,39 @@ def get_opponent_active_hp(obs):
         return None
 
 
+def apply_weakness_resistance(obs, dmg):
+    """Adjust a flat attack-damage number for the real Weakness/Resistance
+    rule. Verified empirically against the native engine (a probe pitting a
+    known-damage attack against fixed weak-to-Fighting and resistant-to-
+    Fighting opponents showed exactly x2 damage on the weakness match and a
+    flat -30 on the resistance match, floored at 0) -- this had previously
+    been left unimplemented as "unverified" (see docs/ENGINE_NOTES.md).
+    attack_score/attack_is_lethal only ever compared the raw `damage` field
+    to the opponent's HP, so a hit that's actually lethal thanks to Weakness
+    could be scored as merely a setup move, and a hit into a Resistant
+    target could be overvalued."""
+    if dmg <= 0:
+        return dmg
+    cur = obs.get("current")
+    if not cur:
+        return dmg
+    try:
+        my_active = (cur["players"][cur["yourIndex"]].get("active") or [None])[0]
+        my_card = CARD_DB.get(my_active["id"]) if my_active else None
+        opp_active = (cur["players"][1 - cur["yourIndex"]].get("active") or [None])[0]
+        opp_card = CARD_DB.get(opp_active["id"]) if opp_active else None
+        if not my_card or not opp_card:
+            return dmg
+        my_type = my_card.get("energyType")
+        if opp_card.get("weakness") == my_type:
+            return dmg * 2
+        if opp_card.get("resistance") == my_type:
+            return max(0, dmg - 30)
+        return dmg
+    except Exception:
+        return dmg
+
+
 def card_value(card):
     """Rough heuristic value of a card: bigger/rarer Pokemon and useful
     trainers score higher. Used both to pick the *best* card (search, play,
@@ -296,6 +329,7 @@ def attack_score(obs, attack_id):
         text = atk.get("text")
         discard_pile_dmg = _discard_pile_damage(obs, text)
         dmg = discard_pile_dmg if discard_pile_dmg is not None else _expected_discard_damage(text)
+    dmg = apply_weakness_resistance(obs, dmg)
     score = 60.0 + dmg / 5.0
     opp_hp = get_opponent_active_hp(obs)
     if opp_hp is not None and opp_hp > 0 and dmg >= opp_hp:
@@ -409,11 +443,13 @@ def opponent_underprepared(obs):
 
 
 def attack_is_lethal(obs, attack_id):
-    """True when this attack's flat damage would KO the opponent's active
-    right now. Ending the exchange and banking a prize outranks any setup
-    move, so this is checked ahead of every other tier."""
+    """True when this attack's damage (after Weakness/Resistance -- see
+    apply_weakness_resistance) would KO the opponent's active right now.
+    Ending the exchange and banking a prize outranks any setup move, so this
+    is checked ahead of every other tier."""
     atk = ATTACK_DB.get(attack_id)
     dmg = (atk.get("damage") if atk else 0) or 0
+    dmg = apply_weakness_resistance(obs, dmg)
     opp_hp = get_opponent_active_hp(obs)
     return opp_hp is not None and opp_hp > 0 and dmg >= opp_hp
 

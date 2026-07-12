@@ -149,6 +149,55 @@ def test_attack_is_lethal_false_when_damage_insufficient(sub):
     assert sub.attack_is_lethal(_obs(opp_active={"hp": 1000, "energies": []}), 983) is False
 
 
+# --- apply_weakness_resistance ----------------------------------------------
+# Card 678 (Mega Lucario ex, energyType=6/Fighting) is our attacker in all of
+# these. Card 24 (Team Rocket's Kangaskhan ex) is weakness=6; card 80 (Iron
+# Crown ex) is resistance=6; card 333 (Riolu) is weakness=5, i.e. a neutral
+# matchup for a Fighting attacker. Multiplier/reduction values (x2, -30) were
+# verified empirically against the native engine (see docs/ENGINE_NOTES.md).
+
+def test_weakness_doubles_damage(sub):
+    obs = _obs(active={"id": 678}, opp_active={"id": 24, "hp": 999})
+    assert sub.apply_weakness_resistance(obs, 100) == 200
+
+
+def test_resistance_reduces_damage_by_30(sub):
+    obs = _obs(active={"id": 678}, opp_active={"id": 80, "hp": 999})
+    assert sub.apply_weakness_resistance(obs, 100) == 70
+
+
+def test_resistance_floors_at_zero(sub):
+    obs = _obs(active={"id": 678}, opp_active={"id": 80, "hp": 999})
+    assert sub.apply_weakness_resistance(obs, 10) == 0
+
+
+def test_neutral_matchup_leaves_damage_unchanged(sub):
+    obs = _obs(active={"id": 678}, opp_active={"id": 333, "hp": 999})
+    assert sub.apply_weakness_resistance(obs, 100) == 100
+
+
+def test_weakness_resistance_unchanged_when_our_active_unknown(sub):
+    # Existing attack_is_lethal tests above omit our own active entirely --
+    # apply_weakness_resistance must degrade to a no-op rather than crash.
+    obs = _obs(opp_active={"id": 24, "hp": 999})
+    assert sub.apply_weakness_resistance(obs, 100) == 100
+
+
+def test_attack_is_lethal_true_only_thanks_to_weakness(sub):
+    # Aura Jab (982): flat 130 damage. 130 < 200 (not lethal by the raw
+    # field) but 130*2=260 >= 200 once Kangaskhan ex's Weakness to Fighting
+    # is applied -- this exact gap (missed free kills) motivated the fix.
+    obs = _obs(active={"id": 678}, opp_active={"id": 24, "hp": 200, "energies": []})
+    assert sub.attack_is_lethal(obs, 982) is True
+
+
+def test_attack_is_lethal_false_once_resistance_applied(sub):
+    # Aura Jab (982): flat 130 >= 110 looks lethal, but Iron Crown ex resists
+    # Fighting for -30, leaving 100 < 110 -- not actually lethal.
+    obs = _obs(active={"id": 678}, opp_active={"id": 80, "hp": 110, "energies": []})
+    assert sub.attack_is_lethal(obs, 982) is False
+
+
 # --- _expected_discard_damage (Hammer-lanche-style "discard N now" text) --
 
 def test_expected_discard_damage_matches_hammer_lanche_pattern(sub):
