@@ -353,6 +353,25 @@ def bench_is_thin(obs):
         return False
 
 
+def bench_is_empty(obs):
+    """True when our bench has 0 Pokemon -- stricter than `bench_is_thin`.
+    A traced real loss showed a search effect (Ultra Ball) fetching a
+    *second* copy of our evolution while the bench sat at 0, which is dead
+    weight with no Basic in play to evolve it from. Deliberately checked
+    separately from `bench_is_thin` (0-1): triggering a Basic-over-evolution
+    search preference at bench==1 too (not just 0) measured as a regression
+    in A/B testing -- with one backup already down, fetching the evolution
+    is still the right call."""
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        p = cur["players"][cur["yourIndex"]]
+        return len(p.get("bench") or []) == 0
+    except Exception:
+        return False
+
+
 def hand_has_pokemon(obs):
     """True when our hand currently holds at least one Basic Pokemon --
     the only kind that can go straight onto an empty bench slot (an
@@ -427,6 +446,13 @@ def score_option(obs, sel, option):
       no Pokemon is in hand to put on it (see `hand_has_pokemon`) -- digging
       for a body to play is more urgent than energy that has nowhere new to
       go yet.
+    - when picking a card from a search effect (Ultra Ball, Brock's
+      Scouting, etc.) with the bench completely empty, a Basic Pokemon
+      outranks an evolution card (see `bench_is_empty`) -- fetching another
+      copy of the evolution is dead weight with no Basic in play to evolve
+      it from. Checked against `bench_is_empty` rather than `bench_is_thin`
+      deliberately: applying this at bench<=1 too (not just 0) measured as a
+      regression in A/B testing.
 
     A "stop stacking energy on an already-maxed attacker, spread it to the
     bench instead" override was also tried (replays visibly showed a 4th/5th
@@ -451,6 +477,13 @@ def score_option(obs, sel, option):
     if t == OPT_CARD:
         card = resolve_card_by_area(obs, sel, option.get("area"), option.get("index"), option.get("playerIndex"))
         val = card_value(card)
+        if bench_is_empty(obs) and card and card.get("cardType") == 0 and card.get("basic"):
+            # A traced real loss showed Ultra Ball fetching a *second* Mega
+            # Lucario ex while the bench sat at 0 -- useless, since there was
+            # no Riolu in play to evolve it from. With an empty bench, a
+            # Basic that can go straight onto it now outranks fetching
+            # another copy of an evolution we can't play yet.
+            val += 100.0
         if ctx == CTX_DISCARD:
             return (4, -val)  # discard the least useful card
         if ctx in (CTX_SETUP_ACTIVE, CTX_TO_ACTIVE):

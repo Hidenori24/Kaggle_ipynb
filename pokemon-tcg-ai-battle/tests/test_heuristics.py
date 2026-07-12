@@ -53,6 +53,46 @@ def test_bench_is_thin_false_when_no_current(sub):
     assert sub.bench_is_thin({"current": None}) is False
 
 
+# --- bench_is_empty -----------------------------------------------------
+
+def test_bench_is_empty_true_when_empty(sub):
+    assert sub.bench_is_empty(_obs(bench=[])) is True
+
+
+def test_bench_is_empty_false_at_one(sub):
+    # Deliberately stricter than bench_is_thin (0-1): a search-target
+    # override checked against this measured better in A/B testing when
+    # scoped to a literally empty bench, not "1 or fewer".
+    assert sub.bench_is_empty(_obs(bench=[{"id": 333}])) is False
+
+
+def test_bench_is_empty_false_when_no_current(sub):
+    assert sub.bench_is_empty({"current": None}) is False
+
+
+# --- score_option: OPT_CARD search-target preference at an empty bench ----
+
+def test_score_option_prefers_basic_over_evolution_when_bench_empty(sub):
+    # Riolu (333, Basic) vs Mega Lucario ex (678, evolution) as two search
+    # targets (e.g. Ultra Ball) with the bench empty -- Riolu must outrank
+    # it, since the evolution is dead weight with no Basic in play.
+    obs = _obs(active={"id": 678, "hp": 340}, bench=[], hand=[{"id": 333}, {"id": 678}])
+    sel = {"context": 7}
+    basic_option = {"type": 3, "area": sub.AREA_HAND, "index": 0}
+    evo_option = {"type": 3, "area": sub.AREA_HAND, "index": 1}
+    assert sub.score_option(obs, sel, basic_option) > sub.score_option(obs, sel, evo_option)
+
+
+def test_score_option_does_not_prefer_basic_when_bench_has_one(sub):
+    # Same choice, but with 1 Pokemon already on the bench -- the override
+    # must not fire (bench_is_empty, not bench_is_thin).
+    obs = _obs(active={"id": 678, "hp": 340}, bench=[{"id": 333}], hand=[{"id": 333}, {"id": 678}])
+    sel = {"context": 7}
+    basic_option = {"type": 3, "area": sub.AREA_HAND, "index": 0}
+    evo_option = {"type": 3, "area": sub.AREA_HAND, "index": 1}
+    assert sub.score_option(obs, sel, evo_option) > sub.score_option(obs, sel, basic_option)
+
+
 # --- active_in_danger ----------------------------------------------------
 
 def test_active_in_danger_true_below_35_percent(sub):
