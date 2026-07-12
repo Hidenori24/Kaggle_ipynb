@@ -459,6 +459,22 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
   Basic追加）はこれ以上単発の差し替えを試すのではなく、根本的なロジック改修
   （進化ラインの構成要素に明確なボーナスを与える等、価値評価の同点問題を解消する以上の
   変更）と併せてでない限り、今後も同じ結果になる可能性が高いと考えられる。
+- **ポケモン種を増やさず、ACE SPECの「Maximum Belt」をPowerglass1枚と差し替える（判定：
+  結論に届かず）**: 2種目Basic案が5連敗したことを踏まえ、ポケモン種を増やさない別軸を
+  探索。Powerglass×3+Maximum Belt×1（ACE SPECのため元々1枚上限）——「装着ポケモンの技が
+  相手のアクティブ{ex}に+50ダメージ（弱点・抵抗適用前）」という効果で、このカードプールが
+  実際の対戦環境を模しているため{ex}/megaEx採用デッキが多いと想定し、有望と考えた。
+  600戦A/Bを3回に分けて実施: 1回目は新デッキ53.3%（6バッチ中5つが有利）、2回目は
+  51.7%（6バッチ中3対3で分裂）、ノイズか実効果か判断できず、3回目に1回の継続実行で
+  1200戦の大規模A/Bを追加実施したところ50.7%（12バッチ中7つが有利）。3回の合計2400戦では
+  新デッキ51.6%・旧デッキ48.4%と方向性はプラスだが、単発バッチの結果が42%〜62%まで
+  大きく振れており、このプロジェクトが採用基準としている「ほぼ全バッチで明確に有利」
+  （デッキ乗り換え時の5シード全勝、`bench_is_empty`修正の600戦6バッチ全勝など）には
+  届かない。**保留（不採用ではないが未採用）**——他の不採用アイデア（きれいに50%前後で
+  分裂したもの）よりは前向きな部類だが、2400戦を投じても方向性が確信を持てるレベルまで
+  収束しなかった。今後さらにデータを積むか、Maximum Beltを他のトレーナー1枚（例えば
+  Petrelの1枚）と差し替えるバリエーションを試すことで、この軸に本当に実効果があるのかを
+  もう少し絞り込む価値はあると考える。
 
 ## 7. 現状と今後の課題
 
@@ -912,6 +928,21 @@ We record them here so they aren't retried blind.
   didn't rescue the idea, suggesting the issue runs deeper than a simple value tie. **Rejected**
   (both DECK_V3 and DECK_V4). This axis (adding a second Basic species) likely needs a genuine
   decision-logic change — not just another card swap — before it's worth retrying.
+- **Swap 1 copy of Powerglass for the ACE SPEC "Maximum Belt," without adding a new Pokemon
+  species (inconclusive, not shipped)**: after 5 straight losses on the "add a second Basic"
+  axis, explored a different lever instead. Maximum Belt ("attacks used by the Pokemon this card
+  is attached to do 50 more damage to your opponent's Active Pokemon {ex}, before Weakness and
+  Resistance") looked promising since this card pool's real-meta-inspired design means {ex}/megaEx
+  opponents are common, and it's ACE SPEC (capped at 1 copy anyway, so a low-risk single-card
+  swap). Ran three separate 600-1200 game A/B batches to be sure: 53.3% (5/6 batches favorable),
+  51.7% (split 3-3), and a single continuous 1200-game run at 50.7% (7/12 favorable). Pooled across
+  all three (2400 games total): **51.6% new vs 48.4% old**, directionally positive but with
+  individual 100-game batches swinging from 42% to 62% — nowhere near the "nearly every batch
+  favorable" consistency this project requires before shipping (contrast the deck switch's 60%
+  across all 5 individual seeds, or the `bench_is_empty` fix's 6/6 favorable batches). **Held —
+  not rejected outright, but not shipped either.** Worth either pouring in significantly more
+  games to resolve the noise, or trying a different card to make room for it (e.g. 1 copy of
+  Petrel instead of Powerglass) to see if the signal sharpens.
 
 ## 7. Current Standing and Future Work
 
