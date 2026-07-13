@@ -380,13 +380,20 @@ def prize_value(card):
     KO-er's remaining-prize count by exactly 3 every single time (120/120
     sampled events), while KOing a plain non-ex Basic dropped it by exactly
     1 every single time (173/173 sampled events), across 100 real self-play
-    games. This engine does not follow the real paper TCG's "ex = 2
-    prizes" rule -- here only `megaEx` carries a multi-prize penalty, and it
-    is 3, not 2. Plain (non-mega) `ex` was never on either side's board in
-    these games (our deck runs none), so its true value is unconfirmed and
-    deliberately left at the conservative default (1) rather than guessed."""
-    if card and card.get("megaEx"):
+    games. A separate probe against a plain (non-mega) `ex` Pokemon (Pikachu
+    ex, built into an isolated minimal deck since our own deck runs none)
+    confirmed a third, distinct value: exactly 2 prizes every time, 48/48
+    sampled events -- matching the real paper TCG's "ex = 2 prizes" rule,
+    which this engine does *not* apply to `megaEx` (that's 3, not 2). Our
+    own deck still has no plain-`ex` Pokemon, so this branch doesn't change
+    our own retreat behavior -- it matters once this function is used to
+    evaluate the *opponent's* board (e.g. picking a gust/switch target)."""
+    if not card:
+        return 1
+    if card.get("megaEx"):
         return 3
+    if card.get("ex"):
+        return 2
     return 1
 
 
