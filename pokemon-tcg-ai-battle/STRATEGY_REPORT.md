@@ -475,6 +475,23 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
   収束しなかった。今後さらにデータを積むか、Maximum Beltを他のトレーナー1枚（例えば
   Petrelの1枚）と差し替えるバリエーションを試すことで、この軸に本当に実効果があるのかを
   もう少し絞り込む価値はあると考える。
+- **健康な同種の複製が控えている時、ダメージを受けたアクティブから積極的に退却する
+  （`has_healthier_duplicate_on_bench`）**: ユーザーからの指示で「1手先読み」の方向性を
+  検討する過程で、実戦データ（bench=1で終わる負けが全体の46.2%——bench=0の
+  ブリック系（53.8%）に次ぐ大きな割合）を分析。ローカル自己対戦で該当パターンを4件
+  追跡したところ、全件で同じ構図——**アクティブが力尽きて0になった瞬間、ベンチには
+  満タンHP（またはそれに近い）の2匹目のMega Lucario exが手つかずのまま残っていた**。
+  アクティブが50%未満まで削られ、同じ種類のベンチポケモンが80%以上のHPを保っている時に
+  退却の優先度を上げる修正を実装（`active_in_danger`にOR条件で追加）。
+  600戦のA/Bテストの結果は旧49.0% vs 新51.0%、6バッチ中2勝2敗2分——きれいに
+  ノイズレベルで一貫した改善は見られなかった。Mega Lucario exの`retreatCost`は2
+  エネルギーと決して軽くなく、退却すること自体に確かな資源コストがかかる
+  （退却する側のエネルギーを2枚失う）。これは今回のセッションで検証した
+  「エネルギー配分の最適化」「相手の即死圏の厳密判定」と同じ系統の「防御的な立ち回りの
+  ためにエネルギー・テンポを差し出す」変更であり、そのいずれもノイズレベルの結果に
+  終わっていることから、**このデッキ・このロジックのアーキテクチャでは、防御目的で
+  エネルギーを消費する変更は一貫して効果が出にくい**という傾向が、今回で3例目、
+  さらに強く裏付けられた形になる。**不採用**。
 
 ## 7. 現状と今後の課題
 
@@ -943,6 +960,22 @@ We record them here so they aren't retried blind.
   not rejected outright, but not shipped either.** Worth either pouring in significantly more
   games to resolve the noise, or trying a different card to make room for it (e.g. 1 copy of
   Petrel instead of Powerglass) to see if the signal sharpens.
+- **Retreat proactively out of a damaged active when a healthy duplicate of the same species is
+  idling on the bench**: while scoping the user-requested "1-ply lookahead" direction, real ladder
+  data showed 46.2% of recent losses end with bench=1 (second-largest category after the 53.8%
+  bench=0 brick pattern). Tracing 4 matching local self-play losses turned up the same shape every
+  time: **our active grinds down to 0 while a second, undamaged (or nearly so) Mega Lucario ex sits
+  idle on the bench the whole game.** Added `has_healthier_duplicate_on_bench()` — fires when our
+  active is below 50% HP and a bench Pokemon of the same species is above 80% — OR'd into
+  `active_in_danger` to bump retreat priority in that situation.
+  600-game A/B: 49.0% old vs 51.0% fix, split 2 favorable / 2 unfavorable / 2 tied across 6 batches
+  — cleanly noise-level. Mega Lucario ex's `retreatCost` is 2 Energy, a real resource cost for
+  switching. This is the same underlying shape as two other rejected ideas this session (the
+  energy-allocation cap and the exact lethal-threat retreat check) — trading Energy/tempo for
+  defensive positioning. With all three now tested and rejected, there's a fairly strong pattern
+  emerging: **this deck's decision logic doesn't have room to spend Energy on defense and still
+  come out ahead** — its win condition is too tightly coupled to keeping the current attacker
+  fed. **Rejected.**
 
 ## 7. Current Standing and Future Work
 
