@@ -335,6 +335,39 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
 対戦相手はこちらの手持ちの練習デッキよりずっと多様なので、闘に弱い/強いポケモンを含む
 デッキと当たる場面はローカルの天井効果よりも本番で意味を持つ可能性が高いと判断した。
 
+### 5.6 「進化元Basicへの評価ボーナス」で、5連敗した2種目Basic案がようやく成立した
+
+6章に記録している通り、「保険用の2種目Basicポケモンを足す」というアイデアは、Sawk
+（3variant）・Farfetch'd（2variant）と合計5回試して全て不採用に終わっていた。ユーザーから
+「もったいない負け方をしてもいいので一度試してみてもいい」と許可を得て、根本原因の
+仮説——`card_value()`が全てのBasicポケモンを生のHPだけで評価するため、Rioluと同HP
+（70）の2種目Basicが完全に同値になり、限られたサーチ・捨て札判断の一部がRiolu以外に
+流れてしまう——を実際に修正して検証した。
+
+`OWN_DECK_EVOLUTION_BASES`（自分のデッキの中で、他のカードの`evolvesFrom`に名前が
+挙がっているBasicの集合。CARD_DBとload_deck()から動的に計算し、"Riolu"をハードコード
+しない、このプロジェクトの一貫した方針に忠実な実装）を追加し、該当するBasicの評価に
++10のボーナスを与えるよう`card_value()`を修正。これによりRioluの評価は7.0→17.0となり、
+同HPのFarfetch'd（7.0のまま、変化なし）との同値関係が解消された。
+
+この修正の効果を2段階で検証した。まず修正単体の効果を分離するテスト（同じFarfetch'd
+入りデッキで、修正あり/なしのロジックを比較）では、600戦で**57.8% vs 42.2%**
+（6バッチ中5つが有利）という明確な改善が見られ、仮説が正しかったことを直接確認できた。
+続いて、この修正込みのFarfetch'd入りデッキ全体を、現行の本番デッキ（Farfetch'dなし）と
+比較した。最初はPowerglassを削る構成（5.4節で既にPowerglassの重要性が判明していたため
+不利）で試したところ48.5%と僅かに届かず、代わりに**Petrel**（「トレーナーカードを
+1枚サーチ」——Buddy-Buddy Poffin・Ultra Ball・Brock's Scouting・Cyranoが既に揃っている
+今、最も冗長度が高いカードと判断）を削る構成に変更したところ、600戦で52.5%、追加で
+1200戦を投じて52.2%、さらに1800戦で51.2%——**3回の独立した検証（合計3,600戦）が
+いずれも51〜53%という狭い範囲に収まり**、Maximum Belt検証時（42%〜67%まで大きく
+振れ続けた）とは対照的に安定した傾向を示した（36バッチ中22バッチが有利）。
+
+**採用**。単発の勝率としては控えめ（51.75%）だが、(1) 修正単体の効果は57.8%という
+大きく明確な数字で直接確認済み、(2) デッキ全体としての効果も3回の独立検証全てで
+同じ狭い範囲に収まる一貫性を示した、という2点から、ノイズと判断せず採用に踏み切った。
+`submission/deck.csv`・`DEFAULT_DECK`をPetrel抜き・Farfetch'd入りの構成
+（v3）に更新し、`card_value()`の修正も本体に組み込んだ。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -401,6 +434,12 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
   「Rioluを優先的に探す」ような、単純なHP/ステータス評価を超えた「デッキプラン全体の理解」が
   伴わないと、保険用カード自体が本来のエンジンの引きを薄める副作用の方が大きく出てしまうのでは
   ないか、というのが現時点での仮説。
+
+  **追記（5.6節参照）**: この時点で試した価値評価修正はSawk自体には効かなかったが、後日
+  Farfetch'd——HP70でBuddy-Buddy Poffinの上限とも噛み合う——に対して同じ修正を適用した
+  ところ明確に機能した。SawkはHP110のためBuddy-Buddy Poffinから最初から候補として
+  提示されず、価値評価をいくら直しても「そもそも選ばれる機会」自体が他の候補より少なかった
+  ことが、修正が効かなかった一因だったと考えられる。
 - **エネルギー付け先に「もう十分なエネルギーがある」ガードを入れる**: 5.4節と同じ実戦データ
   （負けの一定割合がベンチ2体以上でもエネルギーが偏って残っていたパターン）から、
   「攻撃で使い切れる上限を超えてエネルギーを1体に積み続けるのは無駄ではないか」という
@@ -459,6 +498,13 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
   Basic追加）はこれ以上単発の差し替えを試すのではなく、根本的なロジック改修
   （進化ラインの構成要素に明確なボーナスを与える等、価値評価の同点問題を解消する以上の
   変更）と併せてでない限り、今後も同じ結果になる可能性が高いと考えられる。
+
+  **追記（5.6節参照）**: まさにこの「根本的なロジック改修」を実施したところ、6回目の
+  挑戦でこの軸は最終的に成立した。`card_value()`に進化元Basicへの評価ボーナスを追加し、
+  Cyrano・Powerglassの代わりにPetrelを削る構成に変えたところ、3,600戦（3回の独立検証）
+  で51.75%という安定した改善を確認し、**採用**。上記の「アーキテクチャ自体が複数種の
+  Basicが同居する状況を苦手としている」という分析は、価値評価の同点問題という具体的な
+  原因まで踏み込めば解消可能だったことになる。
 - **ポケモン種を増やさず、ACE SPECの「Maximum Belt」をPowerglass1枚と差し替える（最終判定：
   不採用）**: 2種目Basic案が5連敗したことを踏まえ、ポケモン種を増やさない別軸を探索。
   Powerglass×3+Maximum Belt×1（ACE SPECのため元々1枚上限）——「装着ポケモンの技が相手の
@@ -823,6 +869,37 @@ not a win-rate lift, which the available local practice decks structurally canno
 opponents are far more diverse than our own practice-deck roster, so this has real room to matter
 in production even though it's invisible to local self-play.
 
+### 5.6 An "evolution-base" value bonus finally made the 5-times-rejected second-Basic idea work
+
+As recorded in Section 6, "add an insurance second Basic Pokemon" had been tried and rejected 5
+times (3x Sawk, 2x Farfetch'd). With the user's explicit permission to accept some wasted-loss
+risk and try it once more, we finally fixed the root cause instead of another card swap:
+`card_value()` scored every Basic Pokemon by raw HP alone, so a same-HP rival Basic (Farfetch'd,
+70 HP, same as Riolu) tied with Riolu in search/discard comparisons, diverting some search hits
+away from the one card that actually opens the evolution line.
+
+Added `OWN_DECK_EVOLUTION_BASES` — the set of names referenced by some other deck card's
+`evolvesFrom`, computed dynamically from `CARD_DB`/`load_deck()` rather than hardcoded to "Riolu"
+— and gave any Basic in that set a +10 value bonus. Riolu's value went from 7.0 to 17.0;
+Farfetch'd, referenced by nothing, stayed at 7.0, breaking the tie cleanly.
+
+Verified in two steps. First, isolating the fix's own effect (same Farfetch'd deck, fix vs
+no-fix): **57.8% vs 42.2% over 600 games, 5/6 batches favorable** — a large, clean swing that
+directly confirmed the hypothesis. Second, testing the fixed deck as a whole against the current
+shipped baseline: an initial attempt cutting Powerglass (already known to be load-bearing from
+Section 6) came up just short at 48.5%; cutting **Petrel** instead (the most redundant search
+Trainer once Buddy-Buddy Poffin/Ultra Ball/Brock's Scouting/Cyrano are already in the deck) landed
+at 52.5% over 600 games, then 52.2% over 1200, then 51.2% over 1800 — **three independent runs
+(3,600 games total) all landing in a narrow 51-53% band**, a sharp contrast with the Maximum Belt
+experiment's wild 42-67% batch-level swings that never settled down even after 5,400 games.
+
+**Adopted.** The aggregate win-rate lift (51.75% pooled) is modest by this project's usual
+standard, but two things separate it from a coin flip: (1) the underlying mechanism was
+independently confirmed with a large, clean swing (57.8% vs 42.2%) when isolated from the deck
+change itself, and (2) three separate large-scale runs landed in the same narrow band instead of
+swinging unpredictably. Updated `submission/deck.csv`/`DEFAULT_DECK` to this v3 composition
+(Farfetch'd in, Petrel out) and shipped the `card_value()` fix alongside it.
+
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 
 Several ideas that looked reasonable in theory measurably lowered the win rate once A/B-tested.
@@ -894,6 +971,11 @@ We record them here so they aren't retried blind.
   specific card this deck's plan actually depends on" when picking among multiple Basics (e.g.
   during a search effect), so adding a second Basic option, even a statistically better one,
   seems to dilute the odds of assembling the real plan more than it helps survive early aggro.
+
+  **Update (see Section 5.6):** the value-fix tried here didn't rescue Sawk itself, but applying
+  the same fix to Farfetch'd later (70 HP, which fits Buddy-Buddy Poffin's cap) worked cleanly.
+  Sawk's 110 HP meant Buddy-Buddy Poffin never offered it as a candidate in the first place — no
+  amount of fixing the value comparison helps a card that isn't even in the running.
 - **Cap energy-attach priority once a Pokemon already has enough Energy for its best attack**:
   motivated by the same real-match data as Section 5.4 (some losses left energy stacked unevenly
   across a bench with 2+ Pokemon). Added `energy_need_gap()` — computes how many more Energy a
@@ -946,6 +1028,11 @@ We record them here so they aren't retried blind.
   didn't rescue the idea, suggesting the issue runs deeper than a simple value tie. **Rejected**
   (both DECK_V3 and DECK_V4). This axis (adding a second Basic species) likely needs a genuine
   decision-logic change — not just another card swap — before it's worth retrying.
+
+  **Update (see Section 5.6):** that genuine decision-logic change was exactly what made this axis
+  finally work on the 6th attempt. Adding the `card_value()` evolution-base bonus and cutting
+  Petrel instead of Cyrano/Powerglass landed at a stable 51.75% over 3,600 games across three
+  independent runs. **Adopted.**
 - **Swap 1 copy of Powerglass for the ACE SPEC "Maximum Belt," without adding a new Pokemon
   species (final verdict: rejected)**: after 5 straight losses on the "add a second Basic" axis,
   explored a different lever instead. Maximum Belt ("attacks used by the Pokemon this card is

@@ -1,39 +1,45 @@
 # Pokemon TCG AI Battle - 60 card deck (one cardId per line, '#' = comment)
 #
-# "Mega Lucario ex" Fighting deck, v2. Same Riolu -> Mega Lucario ex core as
-# the v1 deck (see git history for the switch away from the old "Mega
-# Abomasnow ex" water deck) -- this revision does not change the archetype,
-# it raises how often the deck actually reaches its own payoff card.
+# "Mega Lucario ex" Fighting deck, v3. Same Riolu -> Mega Lucario ex core as
+# v1/v2 (see git history) -- this revision does not change the archetype, it
+# adds a second Basic Pokemon (Farfetch'd) as insurance against the deck's
+# main remaining failure mode: real-ladder loss data showed ~35-54% of
+# losses ending in an early "brick" with 0 Pokemon on the bench, traced to
+# the deck running only 8 Pokemon total (4 Riolu, 4 Mega Lucario ex).
 #
-# Real ranked-ladder replay review of 5 fresh losses with the v1 deck showed
-# a pattern worse than piloting mistakes: several games never got an Ultra
-# Ball (or any other way) to find Riolu at all, let alone drew Mega Lucario
-# ex once a Riolu was on the bench. Opponent decks were not obviously more
-# efficient per-attack; we just weren't reaching our own deck's plan often
-# enough. Boss's Orders x4 and Judge x4 (pure disruption, no card search)
-# were swapped for two direct-search Supporters found by scanning the full
-# card pool for "search your deck for a Pokemon" effect text:
+# Two earlier attempts at this exact idea (a different insurance Basic,
+# Sawk, and this same Farfetch'd swapped for Cyrano or Powerglass instead of
+# Petrel) were tried and rejected -- see STRATEGY_REPORT.md Section 6 for
+# the full history of 5 rejected variants. What made this one finally work:
+# `card_value()` scored every Basic Pokemon by raw HP alone, so a same-HP
+# rival Basic (Farfetch'd, 70 HP, same as Riolu) tied with Riolu in
+# search/discard comparisons, diverting some search hits away from the one
+# card that actually opens the evolution line. `OWN_DECK_EVOLUTION_BASES`
+# (computed dynamically from CARD_DB -- any Basic referenced by another deck
+# card's `evolvesFrom`, not hardcoded to "Riolu") now gives that Basic a
+# clear +10 value bonus, breaking the tie in Riolu's favor.
 #
-# 1210 x4  Brock's Scouting (supporter, search up to 2 Basic Pokemon OR 1
-#          Evolution Pokemon -- confirmed by direct simulation that it offers
-#          Mega Lucario ex as a target despite being a megaEx card, not a
-#          plain {ex}. Flexible: grabs a second/third Riolu early, or the
-#          evolution once a Riolu is already down.)
-# 1205 x4  Cyrano (supporter, search up to 3 Pokemon {ex} -- same megaEx
-#          inclusion confirmed by simulation. Only useful once a Riolu is
-#          already in play, since it can't fetch a Basic, but stacks extra
-#          copies of the evolution into hand fast once one is.)
+# 123  x4  Farfetch'd (basic, 70 HP -- also a Buddy-Buddy Poffin target,
+#          unlike the earlier-rejected Sawk whose 110 HP exceeded its <=70 HP
+#          cap. Mach Cut: 1 colorless Energy for a guaranteed 30 dmg, no
+#          coin flip, plus discards a Special Energy from the opponent's
+#          active.)
+# 1219 Team Rocket's Petrel (search a Trainer) was cut to make room -- the
+# least central of the deck's search Trainers once Buddy-Buddy
+# Poffin/Ultra Ball/Brock's Scouting/Cyrano are already in the deck (cutting
+# Cyrano or Powerglass instead was tried first and both measured as clear
+# regressions; both turned out more load-bearing than Petrel).
 #
-# (Poke Pad was checked too and ruled out: its own effect text explicitly
-# excludes any Pokemon with a Rule Box, which covers ex/megaEx, so it can
-# never offer Mega Lucario ex.)
-#
-# A/B-tested with the real engine (same agent logic on both sides) as a
-# direct mirror match against the v1 deck across 5 random seeds: this
-# revision won 60.0% of 260 games (seeds 1-5; 180 games across seeds 1-3,
-# then 80 more across seeds 4-5 to confirm it wasn't a fluke -- every single
-# seed individually favored this deck, 55-67% each). See
-# tools/build_deck.py's mega_lucario_ex_v2 candidate to reproduce.
+# A/B-tested with the real engine (same agent logic, both the deck change
+# and the card_value() fix together) against the v2 deck+logic: 3 separate
+# batches (600/1200/1800 games, single continuous runs) landed at 52.5%,
+# 52.2%, and 51.2% respectively -- a narrow, consistent band across all
+# three independent runs (pooled: 51.75% over 3,600 games, 22/36 individual
+# batches favorable). Isolating the card_value() fix alone (same Farfetch'd
+# deck, fix vs no-fix) showed a much larger, clean swing: 57.8% over 600
+# games, 5/6 batches favorable -- confirming the fix is what makes this
+# deck variant viable at all (earlier Farfetch'd/Sawk attempts without it
+# lost decisively). See STRATEGY_REPORT.md for the full write-up.
 #
 # 333  x4  Riolu (basic, 70 HP, also a Buddy-Buddy Poffin target)
 # 678  x4  Mega Lucario ex (340 HP, evolves from Riolu; Aura Jab: 1 {F}
@@ -42,11 +48,11 @@
 # 1086 x4  Buddy-Buddy Poffin (item, search up to 2 Basic Pokemon with
 #          <=70 HP straight onto the bench)
 # 1121 x4  Ultra Ball (item, search a Pokemon)
-# 1219 x4  Team Rocket's Petrel (supporter, search a Trainer)
 # 1227 x4  Lillie's Determination (supporter, refill hand)
 # 1210 x4  Brock's Scouting (supporter, search 2 Basic or 1 Evolution Pokemon)
 # 1205 x4  Cyrano (supporter, search up to 3 Pokemon {ex})
 # 1163 x4  Powerglass (tool, re-attach energy from discard)
+# 123  x4  Farfetch'd (basic, 70 HP, guaranteed 30 dmg for 1 colorless Energy)
 # 6   x24  Basic {F} Energy
 333
 333
@@ -64,10 +70,6 @@
 1121
 1121
 1121
-1219
-1219
-1219
-1219
 1227
 1227
 1227
@@ -84,6 +86,10 @@
 1163
 1163
 1163
+123
+123
+123
+123
 6
 6
 6

@@ -100,6 +100,34 @@ MEGA_LUCARIO_EX_V2 = (
     + [6] * 24
 )
 
+# Candidate 7 (kept as submission/deck.csv): same core as candidate 6, plus a
+# second Basic Pokemon -- Farfetch'd (70 HP, matching Buddy-Buddy Poffin's
+# <=70 HP search cap; Mach Cut: 1 colorless Energy for a guaranteed 30 dmg,
+# no coin flip) -- to hedge against the deck's remaining failure mode:
+# real-ladder loss data showed a large share of losses ending in an early
+# "brick" with 0 Pokemon on the bench, traced to the deck running only 8
+# Pokemon total (4 Riolu, 4 Mega Lucario ex).
+#
+# Two earlier attempts at this exact idea (a different insurance Basic,
+# Sawk, and this same Farfetch'd swapped for Cyrano or Powerglass) were tried
+# and rejected -- see STRATEGY_REPORT.md Section 6 for all 5 rejected
+# variants. What made this one finally work: submission/main.py's
+# card_value() scored every Basic Pokemon by raw HP alone, so a same-HP
+# rival Basic tied with Riolu in search/discard comparisons, diverting some
+# search hits away from the one card that actually opens the evolution line.
+# OWN_DECK_EVOLUTION_BASES (computed dynamically from CARD_DB, not hardcoded
+# to "Riolu") now gives that Basic a clear value bonus, breaking the tie.
+# Petrel ("search a Trainer card") was cut to make room -- the least central
+# search Trainer once Buddy-Buddy Poffin/Ultra Ball/Brock's Scouting/Cyrano
+# are already in the deck (cutting Cyrano or Powerglass instead was tried
+# first and both measured as clear regressions -- both turned out more
+# load-bearing than Petrel).
+MEGA_LUCARIO_EX_V3 = (
+    [333] * 4 + [678] * 4
+    + [1086] * 4 + [1121] * 4 + [1227] * 4 + [1210] * 4 + [1205] * 4 + [1163] * 4 + [123] * 4
+    + [6] * 24
+)
+
 CANDIDATES = {
     "kangaskhan_swarm": KANGASKHAN_SWARM,
     "grimmsnarl_ex": GRIMMSNARL_EX,
@@ -107,6 +135,7 @@ CANDIDATES = {
     "reference_abomasnow_lean": REFERENCE_DECK_LEAN,
     "mega_lucario_ex": MEGA_LUCARIO_EX,
     "mega_lucario_ex_v2": MEGA_LUCARIO_EX_V2,
+    "mega_lucario_ex_v3": MEGA_LUCARIO_EX_V3,
 }
 
 

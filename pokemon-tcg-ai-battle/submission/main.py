@@ -63,7 +63,7 @@ DECK_CSV_PATH = os.path.join(_HERE, "deck.csv")
 # Kept in sync with deck.csv (see that file for card-by-card commentary).
 DEFAULT_DECK = (
     [333] * 4 + [678] * 4
-    + [1086] * 4 + [1121] * 4 + [1219] * 4 + [1227] * 4 + [1210] * 4 + [1205] * 4 + [1163] * 4
+    + [1086] * 4 + [1121] * 4 + [1227] * 4 + [1210] * 4 + [1205] * 4 + [1163] * 4 + [123] * 4
     + [6] * 24
 )
 
@@ -95,6 +95,32 @@ def _own_deck_energy_ratio():
 
 
 OWN_DECK_ENERGY_RATIO = _own_deck_energy_ratio()
+
+
+def _own_deck_evolution_bases():
+    """Names of cards that some other card in our own deck lists as its
+    `evolvesFrom` -- i.e. the specific Basic(s) that actually unlock our
+    deck's evolution line(s). Computed dynamically from CARD_DB/load_deck()
+    at import time rather than hardcoded to any card name, consistent with
+    this project's data-driven approach (see OWN_DECK_ENERGY_RATIO above).
+    Used by card_value() to distinguish "a Basic with good stats" from "the
+    specific Basic this deck's plan depends on" -- verified via A/B testing
+    to matter once the deck runs a second Basic species (Farfetch'd): without
+    this bonus, a same-HP rival Basic ties with the evolution-enabling one in
+    search/discard comparisons, diverting some search hits away from it."""
+    try:
+        deck = load_deck()
+        names = set()
+        for cid in set(deck):
+            card = CARD_DB.get(cid)
+            if card and card.get("evolvesFrom"):
+                names.add(card["evolvesFrom"])
+        return names
+    except Exception:
+        return set()
+
+
+OWN_DECK_EVOLUTION_BASES = _own_deck_evolution_bases()
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +255,14 @@ def card_value(card):
             val += 5.0
         elif card.get("stage1"):
             val += 2.0
+        if card.get("name") in OWN_DECK_EVOLUTION_BASES:
+            # A raw-HP valuation scores every same-HP Basic identically, so
+            # a generically decent Basic (e.g. Farfetch'd) can tie with the
+            # one Basic our deck's plan actually depends on (e.g. Riolu),
+            # diverting a fraction of limited search/discard decisions away
+            # from the card that opens our evolution line. See
+            # OWN_DECK_EVOLUTION_BASES's docstring.
+            val += 10.0
         return val
     text = " ".join(s.get("text", "") for s in (card.get("skills") or [])).lower()
     val = 6.0
