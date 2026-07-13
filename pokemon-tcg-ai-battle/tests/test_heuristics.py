@@ -107,6 +107,36 @@ def test_active_in_danger_false_when_no_active(sub):
     assert sub.active_in_danger(_obs(active=None)) is False
 
 
+def test_active_in_danger_true_below_55_percent_for_megaex(sub):
+    # 678 = Mega Lucario ex (megaEx=True). 50/100 = 50% is above the 35%
+    # threshold used for ordinary Pokemon but below the 55% threshold used
+    # for a 3-prize megaEx (see prize_value): the retreat window opens
+    # earlier for a Pokemon this costly to lose.
+    assert sub.active_in_danger(_obs(active={"id": 678, "hp": 50, "maxHp": 100})) is True
+
+
+def test_active_in_danger_false_above_55_percent_for_megaex(sub):
+    assert sub.active_in_danger(_obs(active={"id": 678, "hp": 60, "maxHp": 100})) is False
+
+
+def test_active_in_danger_false_below_55_but_above_35_for_non_megaex(sub):
+    # 333 = Riolu (basic, not megaEx). Same 50% HP as the megaEx test above,
+    # but Riolu is only a 1-prize loss, so the flat 35% threshold applies.
+    assert sub.active_in_danger(_obs(active={"id": 333, "hp": 50, "maxHp": 100})) is False
+
+
+def test_prize_value_megaex_is_3(sub):
+    assert sub.prize_value(sub.CARD_DB.get(678)) == 3  # Mega Lucario ex
+
+
+def test_prize_value_basic_is_1(sub):
+    assert sub.prize_value(sub.CARD_DB.get(333)) == 1  # Riolu
+
+
+def test_prize_value_none_is_1(sub):
+    assert sub.prize_value(None) == 1
+
+
 # --- hand_has_pokemon ------------------------------------------------------
 
 def test_hand_has_pokemon_true_for_basic(sub):
