@@ -459,22 +459,23 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
   Basic追加）はこれ以上単発の差し替えを試すのではなく、根本的なロジック改修
   （進化ラインの構成要素に明確なボーナスを与える等、価値評価の同点問題を解消する以上の
   変更）と併せてでない限り、今後も同じ結果になる可能性が高いと考えられる。
-- **ポケモン種を増やさず、ACE SPECの「Maximum Belt」をPowerglass1枚と差し替える（判定：
-  結論に届かず）**: 2種目Basic案が5連敗したことを踏まえ、ポケモン種を増やさない別軸を
-  探索。Powerglass×3+Maximum Belt×1（ACE SPECのため元々1枚上限）——「装着ポケモンの技が
-  相手のアクティブ{ex}に+50ダメージ（弱点・抵抗適用前）」という効果で、このカードプールが
-  実際の対戦環境を模しているため{ex}/megaEx採用デッキが多いと想定し、有望と考えた。
-  600戦A/Bを3回に分けて実施: 1回目は新デッキ53.3%（6バッチ中5つが有利）、2回目は
-  51.7%（6バッチ中3対3で分裂）、ノイズか実効果か判断できず、3回目に1回の継続実行で
-  1200戦の大規模A/Bを追加実施したところ50.7%（12バッチ中7つが有利）。3回の合計2400戦では
-  新デッキ51.6%・旧デッキ48.4%と方向性はプラスだが、単発バッチの結果が42%〜62%まで
-  大きく振れており、このプロジェクトが採用基準としている「ほぼ全バッチで明確に有利」
-  （デッキ乗り換え時の5シード全勝、`bench_is_empty`修正の600戦6バッチ全勝など）には
-  届かない。**保留（不採用ではないが未採用）**——他の不採用アイデア（きれいに50%前後で
-  分裂したもの）よりは前向きな部類だが、2400戦を投じても方向性が確信を持てるレベルまで
-  収束しなかった。今後さらにデータを積むか、Maximum Beltを他のトレーナー1枚（例えば
-  Petrelの1枚）と差し替えるバリエーションを試すことで、この軸に本当に実効果があるのかを
-  もう少し絞り込む価値はあると考える。
+- **ポケモン種を増やさず、ACE SPECの「Maximum Belt」をPowerglass1枚と差し替える（最終判定：
+  不採用）**: 2種目Basic案が5連敗したことを踏まえ、ポケモン種を増やさない別軸を探索。
+  Powerglass×3+Maximum Belt×1（ACE SPECのため元々1枚上限）——「装着ポケモンの技が相手の
+  アクティブ{ex}に+50ダメージ（弱点・抵抗適用前）」という効果で、このカードプールが実際の
+  対戦環境を模しているため{ex}/megaEx採用デッキが多いと想定し、有望と考えた。
+  ユーザーから「さらに試合数を投じて判断を固めてよい」と指示を受け、合計4回に分けて
+  A/Bを実施: 600戦で53.3%（6バッチ中5つが有利）、600戦で51.7%（3対3で分裂）、
+  1200戦の継続実行で50.7%（12バッチ中7つが有利）、さらに3000戦の継続実行で50.9%
+  （20バッチ中12勝8敗）。**4回の合計5,400戦で新デッキ51.2%・旧デッキ48.8%**——
+  方向性は一貫してプラス寄りだが、単発バッチの結果は42%〜62%まで振れ続け、試合数を
+  重ねても「ほぼ全バッチで明確に有利」という水準（デッキ乗り換え時の5シード全勝、
+  `bench_is_empty`修正の600戦6バッチ全勝など）には最後まで届かなかった。この規模
+  （5,400戦、今回のセッションで最大の検証量）まで投じても性質が変わらなかったことから、
+  これ以上試合数を積んでも結論が変わる見込みは低いと判断し、**最終的に不採用**とする。
+  効果自体が完全にゼロとは言い切れない（総合勝率は一貫して50%をわずかに超えている）ため、
+  将来Maximum Beltを他のトレーナー1枚（例えばPetrelの1枚）と差し替えるバリエーションを
+  試す価値は残るが、現時点でこのまま採用するには確信が持てない。
 - **健康な同種の複製が控えている時、ダメージを受けたアクティブから積極的に退却する
   （`has_healthier_duplicate_on_bench`）**: ユーザーからの指示で「1手先読み」の方向性を
   検討する過程で、実戦データ（bench=1で終わる負けが全体の46.2%——bench=0の
@@ -946,20 +947,23 @@ We record them here so they aren't retried blind.
   (both DECK_V3 and DECK_V4). This axis (adding a second Basic species) likely needs a genuine
   decision-logic change — not just another card swap — before it's worth retrying.
 - **Swap 1 copy of Powerglass for the ACE SPEC "Maximum Belt," without adding a new Pokemon
-  species (inconclusive, not shipped)**: after 5 straight losses on the "add a second Basic"
-  axis, explored a different lever instead. Maximum Belt ("attacks used by the Pokemon this card
-  is attached to do 50 more damage to your opponent's Active Pokemon {ex}, before Weakness and
+  species (final verdict: rejected)**: after 5 straight losses on the "add a second Basic" axis,
+  explored a different lever instead. Maximum Belt ("attacks used by the Pokemon this card is
+  attached to do 50 more damage to your opponent's Active Pokemon {ex}, before Weakness and
   Resistance") looked promising since this card pool's real-meta-inspired design means {ex}/megaEx
   opponents are common, and it's ACE SPEC (capped at 1 copy anyway, so a low-risk single-card
-  swap). Ran three separate 600-1200 game A/B batches to be sure: 53.3% (5/6 batches favorable),
-  51.7% (split 3-3), and a single continuous 1200-game run at 50.7% (7/12 favorable). Pooled across
-  all three (2400 games total): **51.6% new vs 48.4% old**, directionally positive but with
-  individual 100-game batches swinging from 42% to 62% — nowhere near the "nearly every batch
-  favorable" consistency this project requires before shipping (contrast the deck switch's 60%
-  across all 5 individual seeds, or the `bench_is_empty` fix's 6/6 favorable batches). **Held —
-  not rejected outright, but not shipped either.** Worth either pouring in significantly more
-  games to resolve the noise, or trying a different card to make room for it (e.g. 1 copy of
-  Petrel instead of Powerglass) to see if the signal sharpens.
+  swap). At the user's explicit request to pour in more games and settle the question, ran four
+  A/B batches total: 600 games at 53.3% (5/6 favorable), 600 at 51.7% (split 3-3), a 1200-game
+  continuous run at 50.7% (7/12 favorable), and a 3000-game continuous run at 50.9% (12/20
+  favorable). **Pooled across all four (5,400 games total): 51.2% new vs 48.8% old** — directionally
+  positive throughout, but individual 100-game batches kept swinging from 42% to 62% no matter how
+  much data was added, never converging toward the "nearly every batch favorable" consistency this
+  project requires before shipping. At this scale (5,400 games, the largest test volume in this
+  session), further data collection is unlikely to change the picture. **Rejected**, though not
+  because the effect is necessarily zero (the pooled rate stayed persistently just above 50%) — a
+  future variant swapping a different card to make room for Maximum Belt (e.g. 1 copy of Petrel
+  instead of Powerglass) might still be worth trying, but this exact swap isn't confident enough
+  to ship.
 - **Retreat proactively out of a damaged active when a healthy duplicate of the same species is
   idling on the bench**: while scoping the user-requested "1-ply lookahead" direction, real ladder
   data showed 46.2% of recent losses end with bench=1 (second-largest category after the 53.8%
