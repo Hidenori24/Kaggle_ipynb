@@ -251,3 +251,31 @@ def test_attack_score_estimates_hammer_lanche_above_raw_zero(sub):
     score = sub.attack_score(_obs(), 1046)
     zero_damage_score = 60.0  # what a real 0-damage, non-lethal attack scores
     assert score > zero_damage_score
+
+
+# --- card_value: OWN_DECK_EVOLUTION_BASES bonus -----------------------------
+# The v3 deck runs two Basic Pokemon of the same HP (Riolu 70, Farfetch'd
+# 70/id 123) -- a raw-HP valuation alone would score them identically,
+# letting search/discard decisions divert some hits away from Riolu (the
+# only one that actually opens the evolution line) toward Farfetch'd. This
+# bonus was verified via A/B testing to matter: isolating it (same deck,
+# fix vs no-fix) measured 57.8% vs 42.2% over 600 games -- see
+# STRATEGY_REPORT.md Section 5 for the full evidence.
+
+def test_own_deck_evolution_bases_contains_riolu(sub):
+    assert "Riolu" in sub.OWN_DECK_EVOLUTION_BASES
+
+
+def test_card_value_riolu_outranks_same_hp_farfetchd(sub):
+    riolu = sub.CARD_DB[333]
+    farfetchd = sub.CARD_DB[123]
+    assert riolu["hp"] == farfetchd["hp"] == 70  # same raw stat, so the
+    # bonus is the only thing that can break the tie
+    assert sub.card_value(riolu) > sub.card_value(farfetchd)
+
+
+def test_card_value_farfetchd_gets_no_evolution_bonus(sub):
+    # Farfetch'd isn't referenced by any other deck card's evolvesFrom, so
+    # it should score at its plain HP-based value with no bonus.
+    farfetchd = sub.CARD_DB[123]
+    assert sub.card_value(farfetchd) == farfetchd["hp"] / 10.0
