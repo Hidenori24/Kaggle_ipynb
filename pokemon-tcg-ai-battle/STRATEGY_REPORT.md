@@ -425,6 +425,56 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
   使えない」という自己制限があるが、`opponent_can_lethal_us()`はこの制限を見ておらず、
   実際には撃てない一時的な見せかけの脅威を検知してしまうケースがあった可能性がある。
   **不採用**。
+- **保険用の2枚目のBasicポケモン（Farfetch'd）を、Cyrano／Powerglassと差し替える**:
+  実戦データで「負けの約35%がターン3〜9という早期のブリック（事故）で終わる」ことが分かり、
+  根本原因はこのデッキの基本ポケモンがRiolu×4・Mega Lucario ex×4の合計8枚しかないことだと
+  特定した。前回のSawk案（3.55節参照）が失敗した一因は、SawkのHPが110でBuddy-Buddy Poffin
+  の「HP70以下」という上限を超えており、最強のサーチカードと噛み合っていなかったことだと
+  分析。カードプール全体をHP70以下・コイントス等の運要素なし・1エネルギー（無色または闘）で
+  確定20ダメージ以上、という条件で再スクリーニングし、**Farfetch'd**（HP70、無色1エネルギーで
+  確定30ダメージ＋相手の特殊エネルギーを1枚ディスカード）を新候補として特定。Buddy-Buddy
+  Poffinの上限にぴたり収まり、Sawkでの失敗要因を理論上解消したはずだった。
+  Cyranoを削ってFarfetch'd×4に差し替えた版（DECK_V3）を600戦A/Bテストしたところ、
+  **旧デッキ64.7% vs 新デッキ35.3%、6バッチ全てで新デッキが劣勢**という、今回の調査で
+  最も大きな悪化を記録した。原因を分析すると、Cyranoの「{ex}を最大3枚まで検索して手札に
+  加える」効果は、実は**Mega Lucario exの複数コピーを見つけるための一貫性エンジン**として
+  非常に重要だったことが判明——「進化先しか探せないから重要度が低い」という当初の判断は誤り
+  だった。そこでCyranoを残し、代わりにPowerglass（エネルギー再利用ツール）を削る版
+  （DECK_V4）を試したが、これも600戦で旧デッキ60.8% vs 新デッキ39.2%、6バッチ全てで
+  劣勢という明確な悪化に終わった。
+  Powerglassも予想以上に重要（アクティブに付けておくと毎ターン終了時に捨て札から基本
+  エネルギーを1枚自動で再アタッチする——Aura Jabが自分から捨てたエネルギーを回収する
+  役割を果たしていた）だったことが分かる一方、**2種類とも削って試した結果が軒並み大敗**
+  という事実は、「何を削るか」よりも**Farfetch'd（2種目のBasicポケモン）自体を含めること
+  自体が問題**である可能性を強く示している。Sawk（3変種）・Farfetch'd（2変種）と、今回の
+  プロジェクト全体で「進化しない保険用の2種目Basicを足す」という実TCGの定石を**合計5variant
+  試して全て失敗**しており、単なる個別カードの相性問題ではなく構造的な失敗パターンと見るべき
+  段階に来ている。考えられる仮説: サーチ・ディスカード等の場面で`card_value()`がRioluと
+  2種目のBasicを同程度に評価してしまう（HPが同じ70なら値が同じ）ため、限られたサーチ機会の
+  一部がRiolu以外に流れてしまい、進化ライン（＝唯一の勝ち筋）にアクセスする実質的な確率を
+  下げている可能性がある——Sawk検証時に試した「他カードの`evolvesFrom`に載っているBasicへ
+  ボーナスを与える」汎用修正でも改善しなかったことを踏まえると、単純な価値評価の同点問題
+  以上に、この意思決定ロジックのアーキテクチャ自体が「複数種のBasicが同居する状況」を
+  苦手としている可能性が高い。**不採用**（DECK_V3・DECK_V4両方）。この軸（2種目の
+  Basic追加）はこれ以上単発の差し替えを試すのではなく、根本的なロジック改修
+  （進化ラインの構成要素に明確なボーナスを与える等、価値評価の同点問題を解消する以上の
+  変更）と併せてでない限り、今後も同じ結果になる可能性が高いと考えられる。
+- **ポケモン種を増やさず、ACE SPECの「Maximum Belt」をPowerglass1枚と差し替える（判定：
+  結論に届かず）**: 2種目Basic案が5連敗したことを踏まえ、ポケモン種を増やさない別軸を
+  探索。Powerglass×3+Maximum Belt×1（ACE SPECのため元々1枚上限）——「装着ポケモンの技が
+  相手のアクティブ{ex}に+50ダメージ（弱点・抵抗適用前）」という効果で、このカードプールが
+  実際の対戦環境を模しているため{ex}/megaEx採用デッキが多いと想定し、有望と考えた。
+  600戦A/Bを3回に分けて実施: 1回目は新デッキ53.3%（6バッチ中5つが有利）、2回目は
+  51.7%（6バッチ中3対3で分裂）、ノイズか実効果か判断できず、3回目に1回の継続実行で
+  1200戦の大規模A/Bを追加実施したところ50.7%（12バッチ中7つが有利）。3回の合計2400戦では
+  新デッキ51.6%・旧デッキ48.4%と方向性はプラスだが、単発バッチの結果が42%〜62%まで
+  大きく振れており、このプロジェクトが採用基準としている「ほぼ全バッチで明確に有利」
+  （デッキ乗り換え時の5シード全勝、`bench_is_empty`修正の600戦6バッチ全勝など）には
+  届かない。**保留（不採用ではないが未採用）**——他の不採用アイデア（きれいに50%前後で
+  分裂したもの）よりは前向きな部類だが、2400戦を投じても方向性が確信を持てるレベルまで
+  収束しなかった。今後さらにデータを積むか、Maximum Beltを他のトレーナー1枚（例えば
+  Petrelの1枚）と差し替えるバリエーションを試すことで、この軸に本当に実効果があるのかを
+  もう少し絞り込む価値はあると考える。
 
 ## 7. 現状と今後の課題
 
@@ -849,6 +899,50 @@ We record them here so they aren't retried blind.
   safety gain; (2) Mega Brave carries a self-imposed "can't use it again next turn" restriction
   that `opponent_can_lethal_us()` doesn't check for, so it can flag a threat that isn't actually
   available yet. **Rejected.**
+- **A second insurance Basic (Farfetch'd), swapped in for Cyrano or Powerglass**: real ladder data
+  showed ~35% of recent losses ending in an early brick (turn 3-9), traced to the deck running only
+  8 Pokemon total (4 Riolu, 4 Mega Lucario ex). The earlier Sawk experiment (Section 3.5-equivalent)
+  likely failed partly because Sawk's 110 HP exceeded Buddy-Buddy Poffin's "70 HP or less" cap, so
+  our best search card could never fetch it. Re-screened the full card pool for a Basic at HP<=70
+  with a non-conditional 1-Energy (colorless or Fighting) attack dealing >=20 damage, and found
+  **Farfetch'd** (HP70, 1 colorless Energy for a guaranteed 30 damage plus discarding a Special
+  Energy from the opponent's active) — fits Buddy-Buddy Poffin's cap exactly, fixing the specific
+  gap that sank Sawk.
+  Swapping out Cyrano for 4x Farfetch'd (DECK_V3) and A/B testing over 600 games came back as the
+  single largest regression measured in this whole investigation: **64.7% old vs 35.3% new, every
+  one of 6 batches unfavorable**. Digging into why revealed that Cyrano's "search for up to 3
+  Pokemon {ex}" is actually a major consistency engine for finding extra copies of Mega Lucario ex
+  — the original assessment that it was "the least useful card" was wrong. Keeping Cyrano and
+  swapping out Powerglass instead (DECK_V4) was tried next; still a clear loss, 600 games at 60.8%
+  old vs 39.2% new, again every batch unfavorable.
+  Powerglass turned out to matter more than expected too (auto-reattaching a discarded Basic Energy
+  to the active Pokemon each end of turn — recovering exactly what Aura Jab discards from itself),
+  but the fact that cutting *either* card for Farfetch'd produced a decisive loss suggests the
+  problem isn't which card to cut — it's that **including a second Basic Pokemon species at all**
+  hurts this deck under the current decision logic. Counting this project's full history, that's
+  now **5 total variants across 2 different insurance-Basic candidates (3x Sawk, 2x Farfetch'd),
+  all rejected**. A plausible mechanism: `card_value()` scores Riolu and any other 70-HP Basic
+  identically, so a fraction of limited search hits get diverted away from Riolu — the only card
+  that actually opens the evolution line — even though a generic "bonus for any Basic that appears
+  in some other card's `evolvesFrom`" fix was already tried during the Sawk investigation and still
+  didn't rescue the idea, suggesting the issue runs deeper than a simple value tie. **Rejected**
+  (both DECK_V3 and DECK_V4). This axis (adding a second Basic species) likely needs a genuine
+  decision-logic change — not just another card swap — before it's worth retrying.
+- **Swap 1 copy of Powerglass for the ACE SPEC "Maximum Belt," without adding a new Pokemon
+  species (inconclusive, not shipped)**: after 5 straight losses on the "add a second Basic"
+  axis, explored a different lever instead. Maximum Belt ("attacks used by the Pokemon this card
+  is attached to do 50 more damage to your opponent's Active Pokemon {ex}, before Weakness and
+  Resistance") looked promising since this card pool's real-meta-inspired design means {ex}/megaEx
+  opponents are common, and it's ACE SPEC (capped at 1 copy anyway, so a low-risk single-card
+  swap). Ran three separate 600-1200 game A/B batches to be sure: 53.3% (5/6 batches favorable),
+  51.7% (split 3-3), and a single continuous 1200-game run at 50.7% (7/12 favorable). Pooled across
+  all three (2400 games total): **51.6% new vs 48.4% old**, directionally positive but with
+  individual 100-game batches swinging from 42% to 62% — nowhere near the "nearly every batch
+  favorable" consistency this project requires before shipping (contrast the deck switch's 60%
+  across all 5 individual seeds, or the `bench_is_empty` fix's 6/6 favorable batches). **Held —
+  not rejected outright, but not shipped either.** Worth either pouring in significantly more
+  games to resolve the noise, or trying a different card to make room for it (e.g. 1 copy of
+  Petrel instead of Powerglass) to see if the signal sharpens.
 
 ## 7. Current Standing and Future Work
 
