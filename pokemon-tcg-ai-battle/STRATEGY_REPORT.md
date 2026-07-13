@@ -368,6 +368,21 @@ Mega Manectric ex（弱点=闘）を使う新規デッキ`MANECTRIC_TEST`の2種
 `submission/deck.csv`・`DEFAULT_DECK`をPetrel抜き・Farfetch'd入りの構成
 （v3）に更新し、`card_value()`の修正も本体に組み込んだ。
 
+v3採用直後、さらなる改善余地を2つ検証したが、いずれも不採用となった。
+- **Farfetch'd → Hawlucha（退却コスト0、こちらの闘エネルギー・超弱点と完全一致）への
+  差し替え**: 理屈上はFarfetch'dより優れているはずだったが、600戦でv3（現行）51.5% vs
+  Hawlucha版48.5%（6バッチ中3勝3敗）と、僅かに劣る結果だった。ミラー戦では両者とも
+  相手が特殊エネルギーを使わないため、Farfetch'dの「相手の特殊エネルギーをディスカード」
+  効果は無関係——純粋なステータス比較でもHawluchaが上回らなかったのは意外だったが、
+  差自体もノイズに近い範囲。**不採用**。
+- **Farfetch'dを4枚→2枚に減らし、Petrelを2枚戻す「軽量版」**: 最初の600戦では
+  v3 45.0% vs 軽量版55.0%（6バッチ中5つが有利）という強い改善が見えたため、1200戦の
+  追加検証を実施したところv3 50.8% vs 軽量版49.2%（12バッチ中3つのみ有利）と明確に
+  反転した。合計1,800戦では51.1%とわずかに軽量版が上回るものの、バッチ有利率は
+  44%（18バッチ中8つ）に低下し、最初の好結果は単なる分散だったと判断せざるを得ない。
+  **不採用**——この一件は、単発の600戦だけで判断せず必ず追加検証を行うという
+  このプロジェクトの方針の重要性を改めて裏付けた。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -899,6 +914,21 @@ independently confirmed with a large, clean swing (57.8% vs 42.2%) when isolated
 change itself, and (2) three separate large-scale runs landed in the same narrow band instead of
 swinging unpredictably. Updated `submission/deck.csv`/`DEFAULT_DECK` to this v3 composition
 (Farfetch'd in, Petrel out) and shipped the `card_value()` fix alongside it.
+
+Right after shipping v3, tried two further tweaks; both rejected:
+- **Swap Farfetch'd for Hawlucha** (retreatCost 0, and its weakness/energyType exactly match our
+  own Pokemon vs Farfetch'd's colorless attack cost) — looked strictly better on paper, but
+  measured slightly worse over 600 games: v3 (current) 51.5% vs Hawlucha-swap 48.5% (split 3-3
+  across 6 batches). In mirror self-play neither side ever uses Special Energy, so Farfetch'd's
+  "discard the opponent's Special Energy" clause never fires either way — this was meant to be a
+  clean stat comparison, and Hawlucha still came up short. **Rejected.**
+- **Cut Farfetch'd from 4 copies to 2, backfilling with 2 Petrel** ("light touch," diluting
+  Riolu's search pool less while keeping some bench insurance): the first 600-game batch looked
+  like a strong win (v3 45.0% vs light-touch 55.0%, 5/6 batches favorable), but a 1200-game
+  confirmation run reversed cleanly (v3 50.8% vs light-touch 49.2%, only 3/12 batches favorable).
+  Pooled across both (1,800 games): light-touch at 51.1%, but batch favorability dropped to 44%
+  (8/18) — the initial result was simply favorable variance. **Rejected** — and a good reminder of
+  exactly why this project never ships on a single 600-game batch.
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 
