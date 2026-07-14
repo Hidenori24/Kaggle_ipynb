@@ -525,6 +525,81 @@ main.py本体からは削除し、`prize_value`の一般化のみを本体に残
 ツールのダメージ未反映は今回のデッキに対しては実害のない確認済みの非問題として記録し、
 コード変更は行わない。
 
+### 5.10 実戦の負けリプレイ3件を精査し、「相手の手札枚数に比例する一撃必殺技」への
+盲点を発見・修正
+
+v3デッキの実戦成績（提出`54666076`）を確認していたところ、負け試合の記録に
+「アクティブが無傷（HP満タン）のまま負けている」ケースが依然として一定数見られた
+（38件中8件、約38%）。これはこのプロジェクトで長らく未解決だった「HP>0での敗北が
+約半数」という謎と同じ系統だったため、実際のリプレイJSON（Kaggle公式のエピソード
+リプレイ、`env.run()`と同じ`steps`形式）を3件（episode 85871001・85834922・
+85847458）取り寄せ、`CARD_DB`/`ATTACK_DB`を使って直接解析した。
+
+**判明した2つの原因:**
+
+1. **`kaggle_watch.py`の観測スナップショットの遅延（ロギングのアーティファクト、
+   ゲームロジックの問題ではない）**: episode 85834922では、自分自身（プレイヤー0）の
+   観測は「アクティブ=Mega Lucario ex、HP340」のまま最後まで更新されていなかったが、
+   同時刻の相手側の観測（自分の盤面がより新しく反映される）を見ると、実際のアクティブは
+   とっくにFarfetch'dに交代済みで、そちらが最終的に倒されていた。つまり
+   **「HP>0での敗北」の少なくとも一部は、敗者側の自己観測が更新されないまま
+   `kaggle_watch.py`がそこからHPを読み取っているために起きる、純粋な集計上の
+   アーティファクトだった**。episode 85871001も同様のロジックで説明がつき
+   （Solrockの「Cosmic Beam」——闘エネルギー1枚・70ダメージ・弱点抵抗無視——が
+   Farfetch'dのHP70にジャストで一致する一撃必殺で、記録上の「HP70のまま敗北」は
+   撃破前の観測を拾っていただけだった）、実際のゲーム上の異常ではないと確認できた。
+
+2. **「相手の手札枚数に比例するワンパン技」への完全な盲点（本物の穴、修正対象）**:
+   episode 85847458では、両者の直近の観測が一致して「Mega Lucario exがHP340のまま」
+   だったため、ロギングの問題ではなく本当に無傷の状態から一撃で倒されていた。原因は
+   相手のAlakazamの技「Powerful Hand」（`ATTACK_DB` attackId 1072）——
+   *「自分の手札1枚につきダメージカウンターを2個（=20ダメージ）を相手のアクティブに
+   置く」*——という、手札枚数に応じて際限なく伸びる技だった（実測: 相手の手札枚数20枚
+   ×20=400ダメージ、HP340のMega Lucario exを一撃で撃破するのに十分）。
+
+   `attack_score()`/`attack_is_lethal()`は`ATTACK_DB`の`damage`フィールド（この技は
+   0固定）しか見ておらず、`active_in_danger()`もHP割合の閾値でしか判定していないため、
+   **この種の技は「撃たれる直前まで完全に無傷」に見えてしまい、既存のどの防御ロジックも
+   検知しようがなかった**。カードプールを再スキャンしたところ、同系統の技が他に2件
+   見つかった（`Mind Ruler` id123・`Resentful Refrain` id1240——こちらは逆に
+   「**相手**（=自分）の手札枚数」に比例するダメージ）。
+
+**修正**: `opponent_lethal_threat_damage(obs)`を追加。相手のアクティブが持つ技を
+`ATTACK_DB`のテキストから正規表現で走査し、(a)「自分の手札1枚につきダメージ
+カウンターN個」パターンなら相手自身の`handCount`、(b)「相手（＝自分）の手札1枚に
+つきNダメージ」パターンなら自分の`handCount`を使って推定ダメージを計算する
+（`_expected_discard_damage`/`_discard_pile_damage`など、既存の「`damage:0`だが
+テキストに実際のダメージ条件がある」パターンを扱う仕組みと同じ方針）。相手のアクティブに
+その技を使うのに十分なエネルギーが**今すでに**付いている場合のみ「今すぐの脅威」として
+数える（安全側に倒した近似——1手先読みの精密なシミュレーションではない）。
+`active_in_danger()`をこの推定脅威ダメージが自分の現在HPを超える場合にも`True`を
+返すよう拡張し、HP割合が何%であっても（たとえ満タンでも）致死級の脅威に対しては
+退却優先度が上がるようにした。
+
+**実際のリプレイに新ロジックを再適用して検証**: episode 85847458のobsを実際に
+新しい`opponent_lethal_threat_damage`/`active_in_danger`に通したところ、相手の
+手札が15枚に達した時点（Mega Lucario exがHP340で健在だった局面）で推定脅威
+300ダメージ（<340、まだ致死ではない）と正しく計算され、それ以前の局面（進化前の
+70HPの基本ポケモンが場に出ていた時点）では300ダメージの脅威に対して
+`active_in_danger()`が正しく`True`を返すことも確認できた。ただし正直に記録すると、
+このリプレイでは相手の1ターンが非常に長く（複数回のカード使用を経て手札が15→20枚まで
+伸びた）、脅威が自分のHPを実際に超えた時点（400>340）では既に相手の手番が続いて
+おり、自分側の新しい意思決定のタイミングは訪れなかった——つまり**この特定の1試合を
+今回の修正だけで確実に防げたとは言い切れない**。それでも、脅威が自分の意思決定
+タイミングで既に致死級に達している、より一般的なケース（このリプレイより手札の
+伸びが早い相手、あるいはこちらの手番がもう少し多く挟まるケース）では確実に機能する
+はずで、これまで完全に見えていなかった脅威を初めて検知できるようになった点に価値がある。
+
+**A/Bテストについて**: 自分のデッキ（Riolu / Mega Lucario ex / Farfetch'd）には
+手札依存ダメージを持つポケモンが1体も含まれないため、自己対戦（ミラーマッチ）では
+この関数は理論上必ず0を返し、挙動は一切変わらない（5.9節の`prize_value`一般化と
+同じ構造）。実際に300戦の自己対戦A/Bで確認したところ47.3%——このプロジェクトで
+較正済みの「真の効果が皆無でも単発バッチは43〜57%振れる」というノイズ帯に完全に
+収まっており、「自己対戦では無害な変更」という主張を裏付けている。勝率ベースの
+A/Bでは検証できないため、5.5節の弱点・抵抗補正修正と同じ基準（(1) 現象を実際の
+リプレイデータで直接確認、(2) 新ロジックを実際のobsに再適用して発火条件が正しい
+ことを確認、(3) 自己対戦で無害であることを確認）で採用と判断した。**採用**。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1232,6 +1307,73 @@ Belt was already tried as a deck addition and rejected after 5,400 games (Sectio
 the others are in our deck. Per the same "no code for a hypothetical card not currently in play"
 principle, Tool-damage-aware lethal detection was **not implemented** this round — recorded as an
 investigated-and-confirmed-non-issue rather than a silent gap.
+
+### 5.10 Digging into 3 real loss replays: closing a blind spot against hand-size-scaling one-shot attacks
+
+Checking on v3's real-ladder results (submission `54666076`), a chunk of recorded losses (8/38,
+~38%) still showed our active at full/high HP at the moment of loss — the same "HP>0 at loss"
+mystery this project had flagged as unresolved (see the retrospective analysis before Section 5.7).
+Pulled 3 actual Kaggle episode replays (85871001, 85834922, 85847458 — the real
+`kaggle_environments`-format JSON, same `steps` schema `env.run()` returns) and parsed them directly
+against `CARD_DB`/`ATTACK_DB`.
+
+**Two distinct root causes emerged:**
+
+1. **A logging/snapshot-staleness artifact in `kaggle_watch.py` (not a real gameplay issue).** In
+   episode 85834922, our own (player 0's) observation stayed frozen at "active = Mega Lucario ex,
+   340 HP" all the way to the game's end, but the opponent's more current view of our board (updated
+   live, since it was genuinely their turn) showed our real active had already swapped to
+   Farfetch'd, which is what actually died. **At least part of the long-standing "HP>0 at loss"
+   pattern is simply `kaggle_watch.py` reading HP from the losing side's own stale self-observation**
+   — not a real mechanic. Episode 85871001 confirmed the same story from the other direction: Solrock's
+   "Cosmic Beam" (1 Fighting Energy, 70 damage, ignores Weakness/Resistance) landed an exact-lethal
+   hit on our 70-HP Farfetch'd, and the "HP=70 at loss" in the summary was just the pre-hit snapshot.
+
+2. **A real, previously invisible blind spot: attacks that scale with hand size (a genuine fix).**
+   Episode 85847458 was different — both sides' *current* observations agreed our Mega Lucario ex was
+   still at a full 340 HP right up to the moment it died. The cause: the opponent's Alakazam used
+   "Powerful Hand" (`ATTACK_DB` attackId 1072) — *"place 2 damage counters on your opponent's Active
+   Pokemon for each card in your hand"* — an attack with no damage cap that scales entirely with the
+   attacker's own hand size (measured: their hand count reached 20, for 20×20=400 damage, more than
+   enough to one-shot a full-HP 340-HP Pokemon).
+
+   `attack_score()`/`attack_is_lethal()` only ever read the flat `damage` field (0 for this attack),
+   and `active_in_danger()` only checks HP ratio — so **this class of attack was completely invisible
+   to every existing defensive check**, since the target looks perfectly healthy right up until it's
+   already dead. A pool-wide scan found two more attacks with the same underlying pattern: `Mind
+   Ruler` (id 123) and `Resentful Refrain` (id 1240) — both scale with *our* (the defender's) hand
+   size instead of the attacker's.
+
+**Fix**: added `opponent_lethal_threat_damage(obs)`, which scans the opponent's active Pokemon's
+attacks against `ATTACK_DB` text via regex for both patterns — (a) "N damage counters ... for each
+card in your hand" uses the *opponent's own* `handCount`, (b) "N damage for each card in your
+opponent's hand" uses *our own* `handCount` — following the same "the raw `damage` field reads 0 but
+the text describes real conditional damage" approach already used by `_expected_discard_damage`/
+`_discard_pile_damage`. Only counts an attack as a live threat if the opponent's active already has
+enough Energy attached to use it *right now* (a deliberately conservative approximation, not a full
+one-ply simulation). Extended `active_in_danger()` to also return `True` whenever this estimated
+threat meets or exceeds our current HP, regardless of HP ratio — so even a Pokemon at 100% HP now
+gets flagged as needing to retreat against a live lethal hand-scaling threat.
+
+**Re-ran the real replay's `obs` through the new logic to verify it.** At the point in episode
+85847458 where the opponent's hand reached 15 cards (Mega Lucario ex still healthy at 340 HP), the
+new code correctly computed a 300-damage threat (below 340, correctly not yet flagged as lethal); at
+an earlier point where a 70-HP Basic was active, the same 300-damage threat correctly returned
+`active_in_danger() == True`. Being honest about the limits here: in this specific replay, the
+opponent's single turn ran very long (their hand grew from 15 to 20 cards across many actions within
+one turn), and by the time the threat actually exceeded our HP (400 > 340) we had no further decision
+point left to react to it — so **this fix cannot be said to have definitely prevented this exact
+loss**. It should still help in the more common case where the threat is already lethal at the moment
+we actually get to decide something — a real, previously nonexistent detection capability either way.
+
+**On A/B testing**: our own deck (Riolu/Mega Lucario ex/Farfetch'd) contains no Pokemon with a
+hand-size-scaling attack, so in self-play mirror matches this function provably always returns 0 —
+same structure as Section 5.9's `prize_value` generalization. Confirmed empirically with 300 self-play
+games: 47.3%, squarely inside this project's calibrated noise band for a true no-op (43-57% from pure
+variance). Since a win-rate A/B can't validate this, adopted using the same bar as the Weakness/
+Resistance fix (Section 5.5): (1) the underlying mechanic verified directly against real match data,
+(2) the new logic re-applied to real `obs` and confirmed to fire under exactly the right conditions,
+(3) confirmed harmless in self-play. **Adopted.**
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 
