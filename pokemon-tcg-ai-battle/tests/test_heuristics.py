@@ -137,6 +137,16 @@ def test_prize_value_none_is_1(sub):
     assert sub.prize_value(None) == 1
 
 
+def test_prize_value_plain_ex_is_2(sub):
+    assert sub.prize_value(sub.CARD_DB.get(328)) == 2  # Pikachu ex (ex, not megaEx)
+
+
+def test_prize_value_plain_ex_dict_is_2(sub):
+    # Guards the branch logic itself regardless of whether card 328 stays a
+    # plain ex in a future CARD_DB revision.
+    assert sub.prize_value({"ex": True, "megaEx": False}) == 2
+
+
 # --- hand_has_pokemon ------------------------------------------------------
 
 def test_hand_has_pokemon_true_for_basic(sub):
@@ -309,3 +319,4 @@ def test_card_value_farfetchd_gets_no_evolution_bonus(sub):
     # it should score at its plain HP-based value with no bonus.
     farfetchd = sub.CARD_DB[123]
     assert sub.card_value(farfetchd) == farfetchd["hp"] / 10.0
+
