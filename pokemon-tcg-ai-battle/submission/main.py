@@ -397,13 +397,78 @@ def prize_value(card):
     return 1
 
 
+_ATTACKER_HAND_DAMAGE_RE = re.compile(
+    r"(\d+) damage counters?.*?for each card in your hand", re.IGNORECASE
+)
+_DEFENDER_HAND_DAMAGE_RE = re.compile(
+    r"(\d+) damage for each card in your opponent.s hand", re.IGNORECASE
+)
+
+
+def opponent_lethal_threat_damage(obs):
+    """Best damage the opponent's *current active* could already deal to
+    our active right now, among attacks that scale with hand size rather
+    than a flat number -- a real loss replay (episode 85847458, see
+    STRATEGY_REPORT.md) showed our full-HP (340/340) Mega Lucario ex
+    one-shot by Alakazam's "Powerful Hand" ("place 2 damage counters on
+    your opponent's Active Pokemon for each card in your hand" -- 20 x a
+    20-card hand = 400 damage), a threat completely invisible to any
+    HP%-threshold retreat check since our active never dropped below 100%
+    HP before dying. Also covers the mirror-image pattern ("N damage for
+    each card in your opponent's hand", e.g. Mind Ruler/Resentful Refrain)
+    which scales with *our own* hand size instead.
+
+    Deliberately conservative: only counts an attack the opponent's active
+    already has enough Energy attached to use *right now* (not "could
+    afford after one more attach"), since this is evaluated on our own
+    turn, one attach before their next turn actually happens -- a cheap
+    approximation, not a perfect one-ply simulation."""
+    cur = obs.get("current")
+    if not cur:
+        return 0.0
+    try:
+        my_hand_count = cur["players"][cur["yourIndex"]].get("handCount") or 0
+        opp = cur["players"][1 - cur["yourIndex"]]
+        opp_active = (opp.get("active") or [None])[0]
+        if not opp_active:
+            return 0.0
+        opp_card = CARD_DB.get(opp_active.get("id"))
+        if not opp_card or not opp_card.get("attacks"):
+            return 0.0
+        opp_hand_count = opp.get("handCount") or 0
+        opp_energy_count = len(opp_active.get("energies") or [])
+        best = 0.0
+        for aid in opp_card["attacks"]:
+            atk = ATTACK_DB.get(aid)
+            if not atk:
+                continue
+            if opp_energy_count < len(atk.get("energies") or []):
+                continue  # not affordable yet -- not a live threat this turn
+            text = atk.get("text") or ""
+            m = _ATTACKER_HAND_DAMAGE_RE.search(text)
+            if m:
+                best = max(best, int(m.group(1)) * 10 * opp_hand_count)
+                continue
+            m = _DEFENDER_HAND_DAMAGE_RE.search(text)
+            if m:
+                best = max(best, int(m.group(1)) * my_hand_count)
+        return best
+    except Exception:
+        return 0.0
+
+
 def active_in_danger(obs):
     """True when our active Pokemon is low enough on HP that losing it this
     exchange is a live risk. The threshold scales with prize_value: losing
     a megaEx active hands the opponent 3 prizes at once (half the game, see
     prize_value) rather than 1, so it is worth retreating to a disposable
     Basic well before it is truly on death's door -- not just under the
-    flat 35% that is the right call for a Pokemon that only costs 1 prize."""
+    flat 35% that is the right call for a Pokemon that only costs 1 prize.
+
+    Also true regardless of HP% when the opponent's active already has a
+    live, affordable hand-size-scaling attack that would be lethal this
+    instant (see opponent_lethal_threat_damage) -- a threat no HP%
+    threshold can ever catch, since it can one-shot a full-HP Pokemon."""
     cur = obs.get("current")
     if not cur:
         return False
@@ -413,7 +478,10 @@ def active_in_danger(obs):
         if not active:
             return False
         max_hp = active.get("maxHp") or 1
-        ratio = active.get("hp", max_hp) / max_hp
+        hp = active.get("hp", max_hp)
+        if opponent_lethal_threat_damage(obs) >= hp:
+            return True
+        ratio = hp / max_hp
         threshold = 0.55 if prize_value(CARD_DB.get(active.get("id"))) >= 3 else 0.35
         return ratio < threshold
     except Exception:

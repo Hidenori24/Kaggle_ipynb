@@ -26,11 +26,16 @@ def sub():
     return mod
 
 
-def _obs(active=None, bench=None, hand=None, discard=None, opp_active=None, opp_bench=None, your_index=0):
+def _obs(active=None, bench=None, hand=None, discard=None, opp_active=None, opp_bench=None, your_index=0,
+         hand_count=None, opp_hand_count=None):
     """Minimal synthetic `obs["current"]` with just the fields the helpers
     under test actually read."""
     me = {"active": [active] if active else [], "bench": bench or [], "hand": hand or [], "discard": discard or []}
     opp = {"active": [opp_active] if opp_active else [], "bench": opp_bench or []}
+    if hand_count is not None:
+        me["handCount"] = hand_count
+    if opp_hand_count is not None:
+        opp["handCount"] = opp_hand_count
     players = [me, opp] if your_index == 0 else [opp, me]
     return {"current": {"yourIndex": your_index, "players": players}}
 
@@ -145,6 +150,50 @@ def test_prize_value_plain_ex_dict_is_2(sub):
     # Guards the branch logic itself regardless of whether card 328 stays a
     # plain ex in a future CARD_DB revision.
     assert sub.prize_value({"ex": True, "megaEx": False}) == 2
+
+
+# --- opponent_lethal_threat_damage / active_in_danger's hand-scaling case --
+# Grounded in a real loss (episode 85847458, see STRATEGY_REPORT.md): our
+# full-HP (340/340) Mega Lucario ex was one-shot by Alakazam's "Powerful
+# Hand" ("place 2 damage counters on your opponent's Active Pokemon for
+# each card in your hand"), a threat invisible to any HP%-only check.
+
+def test_opponent_lethal_threat_damage_attacker_hand_scaling(sub):
+    # 743 = Alakazam, attack 1072 "Powerful Hand": 2 damage counters
+    # (=20 dmg) per card in *its own* (the opponent's) hand.
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 743, "energies": [{"id": 4}]}, opp_hand_count=20)
+    assert sub.opponent_lethal_threat_damage(obs) == 20 * 10 * 2  # == 400
+
+
+def test_opponent_lethal_threat_damage_zero_when_not_enough_energy(sub):
+    # Powerful Hand needs 1 attached Energy; with none attached it isn't a
+    # live threat yet, regardless of hand size.
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 743, "energies": []}, opp_hand_count=20)
+    assert sub.opponent_lethal_threat_damage(obs) == 0.0
+
+
+def test_opponent_lethal_threat_damage_defender_hand_scaling(sub):
+    # 98 = Chandelure, attack 123 "Mind Ruler": 30 dmg per card in *our*
+    # (the defender's) hand.
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340}, hand_count=5,
+               opp_active={"id": 98, "energies": [{"id": 4}, {"id": 4}]})
+    assert sub.opponent_lethal_threat_damage(obs) == 30 * 5  # == 150
+
+
+def test_active_in_danger_true_for_lethal_hand_scaling_threat_at_full_hp(sub):
+    # Full-HP megaEx (would never trip the 55% ratio check) but the
+    # opponent's live Alakazam threatens exactly enough to KO it.
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 743, "energies": [{"id": 4}]}, opp_hand_count=17)
+    assert sub.active_in_danger(obs) is True
+
+
+def test_active_in_danger_false_when_hand_scaling_threat_not_yet_lethal(sub):
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 743, "energies": [{"id": 4}]}, opp_hand_count=5)
+    assert sub.active_in_danger(obs) is False
 
 
 # --- hand_has_pokemon ------------------------------------------------------

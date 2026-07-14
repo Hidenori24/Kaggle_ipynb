@@ -53,7 +53,14 @@
    悪化を確認したため不採用とした（削減幅を半分にした軽量版も51.0%とノイズと区別できず
    採用基準に届かず）。実装自体の正しさ（複数候補からの選択が常に最良のものになること）は
    150戦で直接確認済みだが、デッキ全体としては見送り（詳細は
-   [`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.9節参照）。
+   [`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.9節参照）。その後、実際のKaggle
+   ラダーの負けリプレイ3件をJSONレベルで直接解析し、「HP満タンのまま負ける」という
+   長年の謎の一部が`kaggle_watch.py`の観測スナップショット遅延によるロギング上の
+   アーティファクトだったことを特定するとともに、相手の手札枚数に比例して際限なく
+   伸びる一撃必殺技（例: Alakazamの「Powerful Hand」）に対する完全な盲点を発見。
+   `opponent_lethal_threat_damage()`を追加し、HP割合に関わらずこの種の致死級の
+   脅威を検知して退却優先度を上げるよう`active_in_danger()`を拡張した（詳細は
+   [`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.10節参照）。
 4. 実測の勝率・カードプールの分析結果を Jupyter Notebook にまとめた
    （捏造データなし、すべて実エンジンでの実行結果）。
 
