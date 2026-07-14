@@ -356,6 +356,33 @@ def _discard_pile_damage(obs, text):
         return 0.0
 
 
+_COIN_FLIP_BONUS_RE = re.compile(
+    r"flip a coin\.\s*if heads,?\s*this attack does (\d+) more damage", re.IGNORECASE
+)
+
+
+def _coin_flip_bonus(text):
+    """Some attacks' flat `damage` field is only the guaranteed portion --
+    e.g. our own Riolu's Quick Attack ("Flip a coin. If heads, this attack
+    does 20 more damage.", `damage: 10`) reads as a flat 10 everywhere in
+    this codebase, silently dropping the other half of its real expected
+    damage. Returns the expected value of that bonus (half the stated
+    amount, since the flip is 50/50) for attack_score's general damage
+    estimate -- 0.0 when the text doesn't match.
+
+    Deliberately not used by attack_is_lethal: an earlier version added the
+    *full* stated bonus there too ("a coin flip that could end the game is
+    worth taking the chance on"), but A/B testing showed that reclassifying
+    a 50/50 shot as guaranteed-lethal-tier priority measurably hurt win rate
+    (see attack_is_lethal's docstring and STRATEGY_REPORT.md for the
+    evidence) -- committing to the gamble apparently costs more in forgone
+    guaranteed setup than it wins back in successful coin flips."""
+    m = _COIN_FLIP_BONUS_RE.search(text or "")
+    if not m:
+        return 0.0
+    return int(m.group(1)) / 2.0
+
+
 def attack_score(obs, attack_id):
     atk = ATTACK_DB.get(attack_id)
     dmg = (atk.get("damage") if atk else 0) or 0
@@ -363,6 +390,8 @@ def attack_score(obs, attack_id):
         text = atk.get("text")
         discard_pile_dmg = _discard_pile_damage(obs, text)
         dmg = discard_pile_dmg if discard_pile_dmg is not None else _expected_discard_damage(text)
+    if atk:
+        dmg += _coin_flip_bonus(atk.get("text"))
     dmg = apply_weakness_resistance(obs, dmg)
     score = 60.0 + dmg / 5.0
     opp_hp = get_opponent_active_hp(obs)
@@ -578,7 +607,21 @@ def attack_is_lethal(obs, attack_id):
     """True when this attack's damage (after Weakness/Resistance -- see
     apply_weakness_resistance) would KO the opponent's active right now.
     Ending the exchange and banking a prize outranks any setup move, so this
-    is checked ahead of every other tier."""
+    is checked ahead of every other tier.
+
+    Deliberately flat-damage-only -- does *not* count a coin flip's
+    best-case bonus (see _coin_flip_bonus, used by attack_score instead).
+    An earlier version of this function used the best-case bonus here too
+    ("a coin flip that could end the game is worth taking the chance on"),
+    reasoning that with nothing better to do this turn, a 50/50 shot at
+    lethal should still outrank setup moves. A/B testing showed this made
+    things measurably worse (three 600-game runs, ~48.7% pooled, a small
+    but consistent dip) versus a variant that kept attack_score's expected-
+    value correction but left this function alone (three 600-game runs,
+    ~52.4% pooled, clearly favorable) -- committing to the tier-11 top
+    priority on a coin flip that only lands half the time apparently costs
+    more in forgone guaranteed setup (energy/evolve) than it wins back in
+    successful gambles. See STRATEGY_REPORT.md for the full A/B evidence."""
     atk = ATTACK_DB.get(attack_id)
     dmg = (atk.get("damage") if atk else 0) or 0
     dmg = apply_weakness_resistance(obs, dmg)

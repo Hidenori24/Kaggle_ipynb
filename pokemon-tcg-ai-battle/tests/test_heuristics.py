@@ -287,6 +287,39 @@ def test_attack_is_lethal_false_once_resistance_applied(sub):
     assert sub.attack_is_lethal(obs, 982) is False
 
 
+# --- _coin_flip_bonus (attack_score only, not attack_is_lethal) ------------
+# Riolu's own Quick Attack (attackId 464): "Flip a coin. If heads, this
+# attack does 20 more damage.", flat damage field = 10. The 20-damage bonus
+# was previously invisible to attack_score (systematic underestimate). An
+# earlier version also fed the *max* bonus into attack_is_lethal (treating
+# a 50/50 shot at lethal as guaranteed-lethal-tier priority), but A/B
+# testing showed that made things measurably worse -- see attack_is_lethal's
+# docstring and STRATEGY_REPORT.md for the evidence. attack_is_lethal stays
+# flat-damage-only.
+
+def test_coin_flip_bonus_matches_quick_attack(sub):
+    text = sub.ATTACK_DB[464]["text"]
+    assert sub._coin_flip_bonus(text) == 10.0  # half of the stated +20
+
+
+def test_coin_flip_bonus_zero_for_non_coin_flip_text(sub):
+    assert sub._coin_flip_bonus("130 damage.") == 0.0
+
+
+def test_attack_is_lethal_ignores_coin_flip_bonus(sub):
+    # 10 (flat) < 25; even though 10+20=30 >= 25 on a heads, attack_is_lethal
+    # deliberately does not gamble on the coin flip (see its docstring).
+    obs = _obs(active={"id": 333}, opp_active={"id": 333, "hp": 25, "energies": []})
+    assert sub.attack_is_lethal(obs, 464) is False
+
+
+def test_attack_score_includes_coin_flip_expected_value(sub):
+    # Neutral matchup (333 vs 333, no weakness/resistance): dmg = 10 (flat)
+    # + 10 (expected value of the 50/50 +20 bonus) = 20 -> score = 60+20/5.
+    obs = _obs(active={"id": 333}, opp_active={"id": 333, "hp": 999})
+    assert sub.attack_score(obs, 464) == 60.0 + 20.0 / 5.0
+
+
 # --- _expected_discard_damage (Hammer-lanche-style "discard N now" text) --
 
 def test_expected_discard_damage_matches_hammer_lanche_pattern(sub):

@@ -60,7 +60,14 @@
    伸びる一撃必殺技（例: Alakazamの「Powerful Hand」）に対する完全な盲点を発見。
    `opponent_lethal_threat_damage()`を追加し、HP割合に関わらずこの種の致死級の
    脅威を検知して退却優先度を上げるよう`active_in_danger()`を拡張した（詳細は
-   [`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.10節参照）。
+   [`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.10節参照）。さらに、コインフリップ技
+  （自分のRioluの「Quick Attack」自体がこのパターン）の期待値がダメージ見積もりに
+   一切反映されていなかった問題を修正。`attack_score()`側の期待値反映は自己対戦A/B
+  （5回・3,000戦・プールして51.4%）で改善を確認して採用したが、`attack_is_lethal()`
+   側で「表が出れば倒せるなら賭ける」という再分類まで行うと逆にA/Bで悪化したため
+  （3回・1,800戦・プールして48.8%）、そちらは確定ダメージのみに差し戻した——1つの
+   変更を丸ごと採用/却下ではなく、A/Bで裏目に出た部分だけを切り分けて差し戻した
+   初めてのケース（詳細は[`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.11節参照）。
 4. 実測の勝率・カードプールの分析結果を Jupyter Notebook にまとめた
    （捏造データなし、すべて実エンジンでの実行結果）。
 
