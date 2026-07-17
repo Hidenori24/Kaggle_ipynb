@@ -637,6 +637,43 @@ A/Bで裏目に出て一部差し戻し
 「全部採用 or 全部却下」の二択ではなく**部分採用**という形で適用した初めての
 ケースとして記録しておく。
 
+### 5.12 4件目の「HP満タンのまま被撃破」リプレイ（#86220242）を精査——
+バグではなく既存の設計限界の再確認
+
+PR #26（5.10節）提出後の本番結果で、「turn11・アクティブHP340（満タン）」
+という同一シグネチャの敗北が短期間に4件観測された。うち1件（エピソード
+#86220242）のリプレイJSONを取得し、`obs.logs`（`type:15`=攻撃実行、
+`type:16`=ダメージ付与）を直接追跡して原因を特定した。
+
+結果は5.10節と同じ「Alakazamの Powerful Hand」による一撃必殺だったが、
+今回はメカニズムが1段階複雑だった。相手は**同じ1ターンの中で** Kadabra→
+Alakazamへ進化し、進化特性「Psychic Draw」で手札を26→28枚まで積み増した
+直後に、その手札枚数をそのままダメージに変換するPowerful Hand
+（`手札1枚につき2ダメージカウンター`）を発動し、HP340のMega Lucario exを
+540ダメージで一撃で倒していた。
+
+これが検知できなかった理由を確認したところ、Kadabraの技「Super Psy Bolt」は
+固定30ダメージのみで手札スケーリングを持たない——つまり**私たちの直前の
+ターン時点では、相手のアクティブに手札スケーリング技はまだ存在していなかった**。
+`opponent_lethal_threat_damage()`は「今このターンに使える技」しか見ない
+設計（5.10節のドキュメント通りの意図的な簡略化）であり、進化して技が
+生まれた瞬間に同じ相手ターン内で即攻撃まで完結するこの形は、原理的に
+検知範囲の外にある。5.10節で修正した「そのままでも撃てる手札スケーリング技」
+のケースとは別物で、コード側の不具合ではないことを確認した。
+
+なお、この調査の過程で「自分視点で見た相手の手札枚数が26で固定・停滞して
+見える」という別の疑わしい兆候（前回セッションで観測ステイル問題を疑った点）
+も検証したが、これは単純な集計ミス（比較対象を取り違えていた）と判明した。
+自分視点の相手手札枚数（26、その後の相手視点でも26→27→28→27と収束）と
+相手視点の自分の手札枚数（9）という**別々の値**を同一視して比較していた
+だけで、実際には双方の観測は終始一致しており、ステイルネスの問題は
+今回のケースには存在しなかった。
+
+この現象への対処は「進化+即攻撃のコンボへの1手先読み」に相当し、既存の
+未着手バックログ項目（7章・1-ply相手先読み）そのものである。今回1件の
+追加確認だけでは実装に踏み切る根拠として不十分と判断し、コード変更は
+行わない——この節は「調査したが対処しない」ことの正直な記録として残す。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1445,6 +1482,43 @@ reverted to flat-damage-only.**
 Recorded here as this project's first case of a *partial* adoption rather than a clean accept/reject —
 same "isolate what actually helps, discard the part that measured worse" discipline as Section 6, just
 applied within a single change instead of across separate variant attempts.
+
+### 5.12 A 4th "died at full HP" replay (#86220242) investigated -- confirms an existing design limit, not a bug
+
+After PR #26 (Section 5.10) went live, real ladder results showed the same "turn 11, active at
+340/340 HP" loss signature recur four times in a short span. One of them (episode #86220242) was
+pulled as JSON and traced directly through `obs.logs` (`type:15` = attack execution, `type:16` =
+damage applied) to find the exact cause.
+
+The killer was again Alakazam's "Powerful Hand," but the setup was one step more elaborate than
+Section 5.10's case. The opponent evolved Kadabra into Alakazam **within the same turn**, using the
+evolution ability ("Psychic Draw") to draw their hand from 26 up to 28 cards, then immediately fired
+Powerful Hand (2 damage counters per card in hand) off that inflated hand size -- 540 damage in one
+shot, one-shotting our 340-HP Mega Lucario ex.
+
+Checking why `opponent_lethal_threat_damage()` didn't catch this: Kadabra's only attack, "Super Psy
+Bolt," is a flat 30 damage with no hand-size scaling at all. So on our previous turn, the opponent's
+active genuinely had no hand-scaling attack yet -- it only existed after they evolved, and they
+evolved and attacked within that same single turn. `opponent_lethal_threat_damage()` is deliberately
+scoped to "attacks already live and affordable this turn" (see Section 5.10), so a threat that is
+created and used within the *opponent's own* turn is structurally outside what a snapshot taken on
+*our* prior turn can see. This is a different failure mode from the one Section 5.10 fixed, not a
+regression or bug in that fix.
+
+While digging into this replay, a second thread from the prior investigation -- "our own view of the
+opponent's hand count looks frozen at 26 across many steps, while the opponent's own view of *their*
+hand count reads 9" -- was also resolved. It turned out to be a bookkeeping mistake in the ad hoc
+analysis script: the "9" was actually the opponent's view of *our* hand count, not their own, so the
+two numbers were never the same quantity in the first place. Once compared correctly, both
+perspectives on the opponent's hand size agree (26 from our side; 26 -> 27 -> 28 -> 27 from their own,
+converging to the same value) -- no staleness artifact in this replay after all.
+
+Fixing this class of loss would require simulating "could the opponent evolve and then attack, all
+within one turn" -- essentially the still-unimplemented 1-ply opponent lookahead already tracked as
+a backlog item (Section 7). A single additional replay isn't enough evidence to justify building
+that now, so no code change was made this round. Recorded here as an investigated-but-not-acted-on
+finding, consistent with this project's practice of documenting negative/inconclusive results rather
+than dropping them silently.
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 
