@@ -196,6 +196,45 @@ def test_active_in_danger_false_when_hand_scaling_threat_not_yet_lethal(sub):
     assert sub.active_in_danger(obs) is False
 
 
+# --- opponent_lethal_threat_damage's next-evolution-stage check -----------
+# Grounded in a second real loss (episode #86220242, see STRATEGY_REPORT.md
+# 5.12): the opponent evolved Kadabra (742, no hand-scaling attack) into
+# Alakazam (743, Powerful Hand) and attacked within the same turn, invisible
+# to a check that only looks at the active's *current* card. 742's own text
+# ("Super Psy Bolt") is a flat 30 damage with no hand-size scaling.
+
+def test_opponent_lethal_threat_damage_checks_next_evolution_stage(sub):
+    # Kadabra active, already carrying the 1 Psychic Energy Powerful Hand
+    # needs (energy carries over through evolution in this engine) and a
+    # large hand -- the same-turn evolve-into-Alakazam-and-attack threat.
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 742, "energies": [{"id": 4}]}, opp_hand_count=20)
+    assert sub.opponent_lethal_threat_damage(obs) == 20 * 10 * 2  # == 400
+
+
+def test_opponent_lethal_threat_damage_evolution_check_needs_energy_too(sub):
+    # Same Kadabra-could-evolve-to-Alakazam threat, but with no Energy
+    # attached yet -- not affordable even after evolving, so not live.
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 742, "energies": []}, opp_hand_count=20)
+    assert sub.opponent_lethal_threat_damage(obs) == 0.0
+
+
+def test_opponent_lethal_threat_damage_zero_when_no_evolution_has_hand_scaling(sub):
+    # Our own evolution line (Riolu -> Mega Lucario ex) has no hand-scaling
+    # attack anywhere in it -- confirms this check is a no-op in mirror
+    # self-play, same as the base hand-scaling check it extends.
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 677, "energies": [{"id": 4}]}, opp_hand_count=30)
+    assert sub.opponent_lethal_threat_damage(obs) == 0.0
+
+
+def test_active_in_danger_true_for_evolution_stage_hand_scaling_threat(sub):
+    obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
+               opp_active={"id": 742, "energies": [{"id": 4}]}, opp_hand_count=17)
+    assert sub.active_in_danger(obs) is True
+
+
 # --- hand_has_pokemon ------------------------------------------------------
 
 def test_hand_has_pokemon_true_for_basic(sub):
