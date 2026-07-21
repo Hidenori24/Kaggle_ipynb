@@ -434,6 +434,49 @@ _DEFENDER_HAND_DAMAGE_RE = re.compile(
 )
 
 
+def _evolutions_by_base_name():
+    """Maps a Pokemon's name to the CARD_DB entries of every card that lists
+    it as `evolvesFrom` -- i.e. what a given Pokemon could evolve into.
+    Built once from the *full* CARD_DB (unlike OWN_DECK_EVOLUTION_BASES,
+    which only looks at our own 60 cards) since this is used to reason
+    about what the *opponent's* active could evolve into, not ours."""
+    table = {}
+    for card in CARD_DB.values():
+        base = card.get("evolvesFrom")
+        if base:
+            table.setdefault(base, []).append(card)
+    return table
+
+
+EVOLUTIONS_BY_BASE_NAME = _evolutions_by_base_name()
+
+
+def _hand_scaling_attack_damage(card, energy_count, attacker_hand_count, defender_hand_count):
+    """Best hand-size-scaling damage among `card`'s attacks that are already
+    affordable with `energy_count` Energy attached. Factored out of
+    opponent_lethal_threat_damage so the same check can be applied both to
+    the opponent's current active and (see that function's docstring) to
+    its next evolution stage."""
+    if not card or not card.get("attacks"):
+        return 0.0
+    best = 0.0
+    for aid in card["attacks"]:
+        atk = ATTACK_DB.get(aid)
+        if not atk:
+            continue
+        if energy_count < len(atk.get("energies") or []):
+            continue  # not affordable yet -- not a live threat this turn
+        text = atk.get("text") or ""
+        m = _ATTACKER_HAND_DAMAGE_RE.search(text)
+        if m:
+            best = max(best, int(m.group(1)) * 10 * attacker_hand_count)
+            continue
+        m = _DEFENDER_HAND_DAMAGE_RE.search(text)
+        if m:
+            best = max(best, int(m.group(1)) * defender_hand_count)
+    return best
+
+
 def opponent_lethal_threat_damage(obs):
     """Best damage the opponent's *current active* could already deal to
     our active right now, among attacks that scale with hand size rather
@@ -447,11 +490,26 @@ def opponent_lethal_threat_damage(obs):
     each card in your opponent's hand", e.g. Mind Ruler/Resentful Refrain)
     which scales with *our own* hand size instead.
 
-    Deliberately conservative: only counts an attack the opponent's active
-    already has enough Energy attached to use *right now* (not "could
-    afford after one more attach"), since this is evaluated on our own
-    turn, one attach before their next turn actually happens -- a cheap
-    approximation, not a perfect one-ply simulation."""
+    Also checks the opponent's active's *next evolution stage* the same
+    way, using the same Energy count -- a second real replay (episode
+    #86220242, see STRATEGY_REPORT.md 5.12) showed the exact blind spot
+    this leaves open: the opponent evolved Kadabra (no hand-scaling attack)
+    into Alakazam (Powerful Hand) and attacked with it all within their own
+    single turn, invisible to a check that only looks at the active's
+    *current* card. Energy carries over through evolution in this engine
+    (confirmed in that same replay), so the Energy gate still applies
+    correctly to the not-yet-evolved card. This does add unavoidable false
+    positives -- the evolution card might not even be in the opponent's
+    hand -- but retreating a turn early is far cheaper than eating a
+    same-turn evolve-and-OHKO, so erring toward caution here is the right
+    trade, consistent with prize_value's retreat-early bias for costly
+    Pokemon (see active_in_danger).
+
+    Deliberately conservative otherwise: only counts an attack already
+    affordable *right now* (not "could afford after one more attach"),
+    since this is evaluated on our own turn, one attach before their next
+    turn actually happens -- a cheap approximation, not a perfect one-ply
+    simulation."""
     cur = obs.get("current")
     if not cur:
         return 0.0
@@ -462,25 +520,20 @@ def opponent_lethal_threat_damage(obs):
         if not opp_active:
             return 0.0
         opp_card = CARD_DB.get(opp_active.get("id"))
-        if not opp_card or not opp_card.get("attacks"):
+        if not opp_card:
             return 0.0
         opp_hand_count = opp.get("handCount") or 0
         opp_energy_count = len(opp_active.get("energies") or [])
-        best = 0.0
-        for aid in opp_card["attacks"]:
-            atk = ATTACK_DB.get(aid)
-            if not atk:
-                continue
-            if opp_energy_count < len(atk.get("energies") or []):
-                continue  # not affordable yet -- not a live threat this turn
-            text = atk.get("text") or ""
-            m = _ATTACKER_HAND_DAMAGE_RE.search(text)
-            if m:
-                best = max(best, int(m.group(1)) * 10 * opp_hand_count)
-                continue
-            m = _DEFENDER_HAND_DAMAGE_RE.search(text)
-            if m:
-                best = max(best, int(m.group(1)) * my_hand_count)
+        best = _hand_scaling_attack_damage(
+            opp_card, opp_energy_count, opp_hand_count, my_hand_count
+        )
+        for evo_card in EVOLUTIONS_BY_BASE_NAME.get(opp_card.get("name"), []):
+            best = max(
+                best,
+                _hand_scaling_attack_damage(
+                    evo_card, opp_energy_count, opp_hand_count, my_hand_count
+                ),
+            )
         return best
     except Exception:
         return 0.0
