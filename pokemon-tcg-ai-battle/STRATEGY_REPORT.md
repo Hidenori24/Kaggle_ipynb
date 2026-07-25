@@ -798,6 +798,51 @@ does 50 more damage for each heads."`、固定200ダメージ）が、5.11節で
 本番でも影響していた可能性がある。実害の有無に関わらず、実データで「0は
 常に無効」と確認できている以上、直す方が明確に正しい。
 
+### 5.17 デッキ本体の根本的な見直し——3候補すべてを検証し、3候補とも不採用
+
+実戦成績が伸び悩んでいることを受け、細かいロジック修正ではなくデッキ本体を
+根本から再検討した。カードプール全体（1267種）を調査した結果、意外な発見が
+あった——**Mega Lucario exは既に効率の良いアタッカー**（Aura Jab: 130ダメージ/1
+エネルギー、Mega Brave: 270ダメージ/2エネルギー）で、実際に負けた相手の
+Dragapult ex（Phantom Dive: 200ダメージ/2エネルギー=100/エネルギー）より
+ダメージ効率で上回っていた。問題は攻撃力ではなく、**デッキの安定性**——60枚中
+実際に殴れるポケモンはRiolu+Mega Lucario exの8枚のみで、残り4枚のFarfetch'd
+は技が貧弱な保険専用だった。
+
+この診断に基づき3つの候補を検証したが、**いずれも不採用**となった。
+
+**候補1: Mega Kangaskhan ex**（無色タイプの`megaEx`、毎ターン2枚ドローの
+特性付き）——200戦で15.0%→20.5%という壊滅的な結果。原因を`obs.logs`で
+直接確認したところ、Mega Kangaskhan exの弱点が「闘」タイプであり、**うちの
+主力Mega Lucario ex自身が闘タイプ攻撃を使う**ため、ミラーマッチ的な場面で
+Aura Jab（130ダメージ）が弱点2倍の260ダメージとしてKangaskhanに命中して
+いた。カード選定時に相手デッキとの相性だけでなく「自分の主力との相性」も
+確認すべきだったという教訓——この調査中に見つけた`_coin_flip_bonus()`の
+一般化（5.15節）と、それがCI上で露呈させた`apply_weakness_resistance()`の
+`0`誤読バグ（5.16節）は、この候補の検証過程での副産物である。
+
+**候補2: Mega Zygarde ex**（闘タイプ、弱点はGrassで自分との相性問題なし）
+——2回の独立600戦で40.6%（233W-367W、254W-346W）。Gaia Waveは200ダメージ/3
+エネルギー（66.7/エネルギー）と、Mega Lucario exより明確に効率が低く、
+「2体目の攻撃役」を追加すること自体がデッキ全体の平均ダメージ効率を
+薄めてしまうと判明。
+
+**候補3: Drilbur**（闘タイプ、盤面に出した時にデッキから闘エネルギーを
+サーチしてトラッシュに送る特性——既存のPowerglass「ターン終了時にトラッシュ
+からエネルギーを再装着」との相乗効果を狙った）——3回の独立600戦で47.2%
+（302W-298W=50.3%、277W-323W=46.2%、271W-329W=45.2%）。ノイズ帯（43〜57%）
+には収まるが3回中2回が50%未満で、採用基準（明確に50%超え）には届かなかった。
+Drilbur自身の攻撃（20ダメージ/2エネルギー=10/エネルギー）がFarfetch'dの
+Mach Cut（30ダメージ/1エネルギー）より弱く、緊急時の代替アタッカーとしての
+価値低下が、狙ったサーチ・トラッシュシナジーの効果を相殺したと見られる。
+
+3候補とも科学的根拠のある仮説から出発したが、いずれも実測で裏付けられな
+かった。Farfetch'd（`card_value()`の進化元ボーナス修正込みのv3構成）は、
+これで合計8種類目の代替案（5.6節・6章の過去5件＋今回3件）に対しても
+なお優位を保っており、この枠における持続的な局所最適解になっている
+可能性が高い。デッキ本体の改革は一旦ここで区切り、別の方向（1-ply先読み
+等）への投資を検討する材料とする。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1752,6 +1797,45 @@ shipped deck's Farfetch'd is also Colorless-type -- if the same misread occurs i
 runtime, it would have been quietly undervaluing Farfetch'd's own attack in every game where it should
 apply no resistance discount. Worth fixing regardless of whether that live impact is confirmed, since
 the "0 always means no value" invariant is independently verified against real data either way.
+
+### 5.17 A ground-up deck reconsideration -- all 3 candidates tested, all 3 rejected
+
+With real-ladder results stagnating, the deck itself (not just scoring logic) was reconsidered from
+scratch. A full card-pool survey (1267 cards) turned up a genuine surprise: **Mega Lucario ex is
+already an efficient attacker** (Aura Jab: 130 damage/1 Energy; Mega Brave: 270 damage/2 Energy) --
+more damage-efficient than Dragapult ex (Phantom Dive: 200 damage/2 Energy = 100/Energy), one of the
+decks that actually beat us. The problem isn't raw power; it's **deck consistency**: only 8 of 60 cards
+are real attackers (4 Riolu, 4 Mega Lucario ex), with the other 4 (Farfetch'd) pure bench insurance
+with a weak attack.
+
+Three candidates were tested against that diagnosis. **All three were rejected.**
+
+**Candidate 1: Mega Kangaskhan ex** (Colorless `megaEx`, draws 2 cards/turn while active) -- a
+catastrophic 15.0% -> 20.5% over 200 games. Traced directly through `obs.logs`: Mega Kangaskhan ex's
+weakness is Fighting, and **our own Mega Lucario ex is a Fighting-type attacker** -- in mirror-adjacent
+matchups, Aura Jab's 130 damage landed as a weakness-doubled 260 against it. A lesson for future card
+selection: check compatibility with our *own* main attacker's type, not just the opposing metagame.
+The `_coin_flip_bonus()` generalization needed to score this card correctly (Section 5.15) and the CI
+resistance bug it surfaced (Section 5.16) were both side effects of investigating this candidate.
+
+**Candidate 2: Mega Zygarde ex** (Fighting-type, weak to Grass -- no self-clash) -- 40.6% pooled over
+two independent 600-game runs (233W-367W, 254W-346W). Gaia Wave's 200 damage/3 Energy (66.7/Energy) is
+notably less efficient than Mega Lucario ex's own attacks, confirming that adding a *less* efficient
+second attacker dilutes the deck's average damage output rather than reinforcing it.
+
+**Candidate 3: Drilbur** (Fighting-type; its ability searches the deck for Basic Fighting Energy and
+discards them when played to the bench -- intended to synergize with the already-shipped Powerglass,
+which reattaches discarded Energy each end of turn) -- 47.2% pooled over three independent 600-game
+runs (50.3%, 46.2%, 45.2%). Inside this project's calibrated no-op noise band (43-57%), but 2 of 3
+batches landed below 50%, short of the bar this project requires to ship. Drilbur's own attack (20
+damage/2 Energy = 10/Energy) is weaker than Farfetch'd's Mach Cut (30 damage/1 Energy), and that
+downgrade as an emergency attacker apparently offset the intended search/discard synergy.
+
+All three candidates started from a reasonable, evidence-backed hypothesis, but none held up under
+measurement. Farfetch'd (with the `card_value()` evolution-base fix from v3) has now outlasted 8
+distinct challengers for this exact slot (5 from Section 6's earlier history, plus these 3), suggesting
+it's a persistent local optimum here rather than an oversight waiting to be fixed. Deck-level reform is
+paused for now in favor of investing in a different lever (e.g. 1-ply lookahead, Section 7).
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 

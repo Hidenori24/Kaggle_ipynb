@@ -103,6 +103,15 @@
    弱点・抵抗判定から明示的に除外する修正を実施——自分のデッキのFarfetch'dも無色
    タイプのため、本番環境で同じ誤読が起きていれば実害があった可能性がある
    （詳細は[`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.16節参照）。
+   これらを踏まえ、デッキ本体を根本から再検討し3つの代替案（Mega Kangaskhan ex・
+   Mega Zygarde ex・Drilbur）を実測したが、**いずれも不採用**——Kangaskhan exは
+   自分のMega Lucario ex自体が闘タイプのため弱点2倍を自傷する構成で15〜20%まで
+   悪化、Zygarde exは技の効率がMega Lucario exより低くデッキ全体の火力を薄めて
+   1,200戦で40.6%、DrilburはPowerglassとのシナジーを狙ったが1,800戦で47.2%
+   （3回中2回が50%未満）と採用基準に届かず。Farfetch'd（v3構成）はこれで
+   合計8種類目の代替案に対しても優位を保ち、この枠の持続的な局所最適解である
+   可能性が高いと判断し、デッキ本体の改革は一旦区切りとした（詳細は
+   [`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.17節参照）。
 4. 実測の勝率・カードプールの分析結果を Jupyter Notebook にまとめた
    （捏造データなし、すべて実エンジンでの実行結果）。
 
