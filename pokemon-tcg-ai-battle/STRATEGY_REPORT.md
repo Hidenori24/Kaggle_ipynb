@@ -749,6 +749,100 @@ Rocket Feathers系（「捨てた枚数×固定ダメージ」だが捨てる枚
 ロジックが原因である具体的な証拠は見つからず、レート/マッチメイキングの
 ドリフトないし通常の分散である可能性が高いという結論のままである。
 
+### 5.15 `_coin_flip_bonus`を「表が出るまで引き直す」型のコインフリップにも一般化
+
+デッキ本体の見直し（後述、デッキ候補の調査中）でMega Kangaskhan exを検討した際、
+その技「Rapid-Fire Combo」（`"Flip a coin until you get tails. This attack
+does 50 more damage for each heads."`、固定200ダメージ）が、5.11節で実装した
+`_coin_flip_bonus()`のどちらの既存パターンにも一致しないことに気づいた。
+これは「1回だけコインを投げる」型（期待値は表示ボーナスの半分）とは異なる、
+「表が出るまで投げ続ける」型で、表が出る回数は幾何分布（公正なコインなら
+平均1回）に従うため、期待値は表示ボーナスの**満額**になる。
+
+全`ATTACK_DB`を検索したところ、この型の技は同一の文言でカードプール全体に
+4種類存在すると確認（1枚だけの特殊ケースではない）。`_coin_flip_bonus()`に
+2つ目の正規表現を追加し、両パターンを区別して正しい期待値を返すよう拡張した。
+`attack_is_lethal()`側には5.11節と同じ理由で引き続き反映しない。
+
+自分のデッキ（v3）にはこの型の技を持つカードが存在しないため、自己対戦では
+今のところノーオペであり、単体テストで両パターンの期待値計算を直接確認した
+上で採用した——5.9節等と同じ「実データで検証済み・自己対戦で無害」という
+基準に基づく。
+
+### 5.16 `apply_weakness_resistance()`の「無抵抗＝0」誤判定を修正——CI上でのみ再現した
+環境依存バグ
+
+5.15節のPR提出後、CI上でのみ`test_attack_score_includes_flip_until_tails_expected_value`が
+一貫して失敗した（ローカルでは単体・フルスイートとも8回連続で成功）。CI側は常に
+同じ誤った値（期待値110に対し実際は104）を返しており、ランダムなflakinessでは
+なく環境依存の決定的な差だと判断した。
+
+差分を逆算すると、resistance分の-30が誤って適用されているのと一致した。
+`apply_weakness_resistance()`は`opp_card.get("resistance") == my_type`で判定して
+おり、`resistance`の「無抵抗」を表す値がローカルでは`None`だが、CI環境では`0`
+として読まれていた可能性が濃厚——ちょうどテストに使ったMega Kangaskhan exの
+`energyType`も`0`（無色）のため、`0 == 0`が成立し、無色アタッカーに対して
+スプリアスな「無色耐性」判定が発生していた。
+
+全`CARD_DB`を実データで確認したところ、`weakness`・`resistance`はどちらも
+1267種中一度も`0`という値を取らない（無色は弱点・抵抗の対象にならないという
+実際のゲームルールと一致）。つまり`0`は常に「無効」を意味するはずで、
+「0 vs 0」の一致を弱点・抵抗判定から明示的に除外する修正は、どちらの
+環境の実際の値がどうであれ常に正しい。`CARD_DB`に`resistance=0`/`weakness=0`
+を直接注入するテストで修正を固定した（ローカル環境では自然には再現しない
+ため、モンキーパッチで直接シミュレート）。
+
+この不整合自体の根本原因（なぜ環境によって`None`/`0`が変わるのか）は特定
+できていないが、現行の自分のデッキにも無色タイプのFarfetch'dが含まれており、
+実際のKaggle実行環境で同じ挙動が起きていれば、Farfetch'd自身の攻撃力評価に
+本番でも影響していた可能性がある。実害の有無に関わらず、実データで「0は
+常に無効」と確認できている以上、直す方が明確に正しい。
+
+### 5.17 デッキ本体の根本的な見直し——3候補すべてを検証し、3候補とも不採用
+
+実戦成績が伸び悩んでいることを受け、細かいロジック修正ではなくデッキ本体を
+根本から再検討した。カードプール全体（1267種）を調査した結果、意外な発見が
+あった——**Mega Lucario exは既に効率の良いアタッカー**（Aura Jab: 130ダメージ/1
+エネルギー、Mega Brave: 270ダメージ/2エネルギー）で、実際に負けた相手の
+Dragapult ex（Phantom Dive: 200ダメージ/2エネルギー=100/エネルギー）より
+ダメージ効率で上回っていた。問題は攻撃力ではなく、**デッキの安定性**——60枚中
+実際に殴れるポケモンはRiolu+Mega Lucario exの8枚のみで、残り4枚のFarfetch'd
+は技が貧弱な保険専用だった。
+
+この診断に基づき3つの候補を検証したが、**いずれも不採用**となった。
+
+**候補1: Mega Kangaskhan ex**（無色タイプの`megaEx`、毎ターン2枚ドローの
+特性付き）——200戦で15.0%→20.5%という壊滅的な結果。原因を`obs.logs`で
+直接確認したところ、Mega Kangaskhan exの弱点が「闘」タイプであり、**うちの
+主力Mega Lucario ex自身が闘タイプ攻撃を使う**ため、ミラーマッチ的な場面で
+Aura Jab（130ダメージ）が弱点2倍の260ダメージとしてKangaskhanに命中して
+いた。カード選定時に相手デッキとの相性だけでなく「自分の主力との相性」も
+確認すべきだったという教訓——この調査中に見つけた`_coin_flip_bonus()`の
+一般化（5.15節）と、それがCI上で露呈させた`apply_weakness_resistance()`の
+`0`誤読バグ（5.16節）は、この候補の検証過程での副産物である。
+
+**候補2: Mega Zygarde ex**（闘タイプ、弱点はGrassで自分との相性問題なし）
+——2回の独立600戦で40.6%（233W-367W、254W-346W）。Gaia Waveは200ダメージ/3
+エネルギー（66.7/エネルギー）と、Mega Lucario exより明確に効率が低く、
+「2体目の攻撃役」を追加すること自体がデッキ全体の平均ダメージ効率を
+薄めてしまうと判明。
+
+**候補3: Drilbur**（闘タイプ、盤面に出した時にデッキから闘エネルギーを
+サーチしてトラッシュに送る特性——既存のPowerglass「ターン終了時にトラッシュ
+からエネルギーを再装着」との相乗効果を狙った）——3回の独立600戦で47.2%
+（302W-298W=50.3%、277W-323W=46.2%、271W-329W=45.2%）。ノイズ帯（43〜57%）
+には収まるが3回中2回が50%未満で、採用基準（明確に50%超え）には届かなかった。
+Drilbur自身の攻撃（20ダメージ/2エネルギー=10/エネルギー）がFarfetch'dの
+Mach Cut（30ダメージ/1エネルギー）より弱く、緊急時の代替アタッカーとしての
+価値低下が、狙ったサーチ・トラッシュシナジーの効果を相殺したと見られる。
+
+3候補とも科学的根拠のある仮説から出発したが、いずれも実測で裏付けられな
+かった。Farfetch'd（`card_value()`の進化元ボーナス修正込みのv3構成）は、
+これで合計8種類目の代替案（5.6節・6章の過去5件＋今回3件）に対しても
+なお優位を保っており、この枠における持続的な局所最適解になっている
+可能性が高い。デッキ本体の改革は一旦ここで区切り、別の方向（1-ply先読み
+等）への投資を検討する材料とする。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1662,6 +1756,86 @@ unbounded false-positive risk without visibility into hand contents, **neither w
 round** -- following the same "one instance isn't enough evidence to safely bound a fix" bar Section
 5.12 first applied. On the win-rate dip itself: no evidence was found tying it to PR #29; rating/
 matchmaking drift or ordinary variance remains the more likely explanation.
+
+### 5.15 Generalized `_coin_flip_bonus` to the "flip until you get tails" coin-flip shape
+
+While researching deck rebuild candidates (below), Mega Kangaskhan ex's attack "Rapid-Fire Combo"
+("Flip a coin until you get tails. This attack does 50 more damage for each heads.", flat damage 200)
+turned out not to match either existing pattern in `_coin_flip_bonus()` (Section 5.11). This is a
+distinct coin-flip shape from the single 50/50 flip already handled: the number of heads before the
+first tails follows a geometric distribution with mean 1 for a fair coin, so its expected value is the
+*full* stated per-head bonus, not half.
+
+A full-`ATTACK_DB` search confirmed this exact phrasing appears on 4 different attacks in the card pool
+(not a one-off). Added a second regex to `_coin_flip_bonus()` to handle it, with `attack_is_lethal()`
+still deliberately excluded for the same reason as Section 5.11. Our own deck (v3) has no attack with
+this shape, so this is currently a no-op in self-play; adopted on unit-test verification of both
+patterns' expected-value math, the same "verified against real data, no-op harmless in self-play" bar
+used elsewhere (e.g. Section 5.9).
+
+### 5.16 Fixed a "no resistance == 0" misread in `apply_weakness_resistance()` -- an environment-dependent bug that only reproduced on CI
+
+After Section 5.15's PR went up, `test_attack_score_includes_flip_until_tails_expected_value` failed
+consistently on CI (expected 110, got 104) while passing 8/8 times locally (isolated and full-suite
+runs alike). Since CI returned the exact same wrong value on two separate runs rather than a different
+value each time, this pointed to a deterministic environment difference, not random flakiness.
+
+Working backward from the 6-point gap (104 vs. the correct 110, i.e. a -30 applied where it shouldn't
+be): `apply_weakness_resistance()` compares `opp_card.get("resistance") == my_type`. The test's card
+(Mega Kangaskhan ex) has `energyType: 0` (Colorless) and no real resistance -- which reads as `None`
+locally, but apparently read as the int `0` on the CI runner. Since `my_type` is also `0` for this
+Colorless attacker, `0 == 0` spuriously matched as "resistant," incorrectly subtracting 30 damage.
+
+Auditing the full `CARD_DB` confirmed weakness/resistance are never legitimately `0` for any of the
+1267 cards (Colorless can't be resisted or be a weakness under this game's real rules), so excluding a
+`0`-vs-`0` match from both checks is correct regardless of which sentinel a given environment happens
+to produce. Pinned the fix with tests that directly monkeypatch `CARD_DB` to inject the ambiguous `0`
+value (the discrepancy doesn't reproduce naturally in this environment, where it already reads `None`).
+
+The root cause of the `None`-vs-`0` environment difference itself remains unidentified, but our own
+shipped deck's Farfetch'd is also Colorless-type -- if the same misread occurs in the real Kaggle
+runtime, it would have been quietly undervaluing Farfetch'd's own attack in every game where it should
+apply no resistance discount. Worth fixing regardless of whether that live impact is confirmed, since
+the "0 always means no value" invariant is independently verified against real data either way.
+
+### 5.17 A ground-up deck reconsideration -- all 3 candidates tested, all 3 rejected
+
+With real-ladder results stagnating, the deck itself (not just scoring logic) was reconsidered from
+scratch. A full card-pool survey (1267 cards) turned up a genuine surprise: **Mega Lucario ex is
+already an efficient attacker** (Aura Jab: 130 damage/1 Energy; Mega Brave: 270 damage/2 Energy) --
+more damage-efficient than Dragapult ex (Phantom Dive: 200 damage/2 Energy = 100/Energy), one of the
+decks that actually beat us. The problem isn't raw power; it's **deck consistency**: only 8 of 60 cards
+are real attackers (4 Riolu, 4 Mega Lucario ex), with the other 4 (Farfetch'd) pure bench insurance
+with a weak attack.
+
+Three candidates were tested against that diagnosis. **All three were rejected.**
+
+**Candidate 1: Mega Kangaskhan ex** (Colorless `megaEx`, draws 2 cards/turn while active) -- a
+catastrophic 15.0% -> 20.5% over 200 games. Traced directly through `obs.logs`: Mega Kangaskhan ex's
+weakness is Fighting, and **our own Mega Lucario ex is a Fighting-type attacker** -- in mirror-adjacent
+matchups, Aura Jab's 130 damage landed as a weakness-doubled 260 against it. A lesson for future card
+selection: check compatibility with our *own* main attacker's type, not just the opposing metagame.
+The `_coin_flip_bonus()` generalization needed to score this card correctly (Section 5.15) and the CI
+resistance bug it surfaced (Section 5.16) were both side effects of investigating this candidate.
+
+**Candidate 2: Mega Zygarde ex** (Fighting-type, weak to Grass -- no self-clash) -- 40.6% pooled over
+two independent 600-game runs (233W-367W, 254W-346W). Gaia Wave's 200 damage/3 Energy (66.7/Energy) is
+notably less efficient than Mega Lucario ex's own attacks, confirming that adding a *less* efficient
+second attacker dilutes the deck's average damage output rather than reinforcing it.
+
+**Candidate 3: Drilbur** (Fighting-type; its ability searches the deck for Basic Fighting Energy and
+discards them when played to the bench -- intended to synergize with the already-shipped Powerglass,
+which reattaches discarded Energy each end of turn) -- 47.2% pooled over three independent 600-game
+runs (50.3%, 46.2%, 45.2%). Inside this project's calibrated no-op noise band (43-57%), but 2 of 3
+batches landed below 50%, short of the bar this project requires to ship. Drilbur's own attack (20
+damage/2 Energy = 10/Energy) is weaker than Farfetch'd's Mach Cut (30 damage/1 Energy), and that
+downgrade as an emergency attacker apparently offset the intended search/discard synergy.
+
+All three candidates started from a reasonable, evidence-backed hypothesis, but none held up under
+measurement. Farfetch'd (with the `card_value()` evolution-base fix from v3) has now outlasted 8
+distinct challengers for this exact slot (5 from Section 6's earlier history, plus these 3), suggesting
+it's a persistent local optimum here rather than an oversight waiting to be fixed. Deck-level reform is
+paused for now in favor of investing in a different lever (e.g. 1-ply lookahead, Section 7).
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 

@@ -208,7 +208,17 @@ def apply_weakness_resistance(obs, dmg):
     attack_score/attack_is_lethal only ever compared the raw `damage` field
     to the opponent's HP, so a hit that's actually lethal thanks to Weakness
     could be scored as merely a setup move, and a hit into a Resistant
-    target could be overvalued."""
+    target could be overvalued.
+
+    Deliberately excludes a match on type 0 (Colorless): a CI run surfaced
+    a case (Mega Kangaskhan ex, a Colorless-type `megaEx`, `energyType: 0`)
+    where the engine's "no resistance" field read as the int 0 rather than
+    the `None` this codebase otherwise always observes for it -- a real
+    audit of the full CARD_DB confirms weakness/resistance are never
+    legitimately 0 for any of the 1267 cards (Colorless can't be resisted
+    or be a weakness in this game's rules), so guarding against a spurious
+    0-vs-0 match on a Colorless attacker is always correct, not just a
+    workaround for whatever produced that one CI discrepancy."""
     if dmg <= 0:
         return dmg
     cur = obs.get("current")
@@ -222,9 +232,11 @@ def apply_weakness_resistance(obs, dmg):
         if not my_card or not opp_card:
             return dmg
         my_type = my_card.get("energyType")
-        if opp_card.get("weakness") == my_type:
+        weakness = opp_card.get("weakness")
+        resistance = opp_card.get("resistance")
+        if weakness not in (None, 0) and weakness == my_type:
             return dmg * 2
-        if opp_card.get("resistance") == my_type:
+        if resistance not in (None, 0) and resistance == my_type:
             return max(0, dmg - 30)
         return dmg
     except Exception:
@@ -359,6 +371,10 @@ def _discard_pile_damage(obs, text):
 _COIN_FLIP_BONUS_RE = re.compile(
     r"flip a coin\.\s*if heads,?\s*this attack does (\d+) more damage", re.IGNORECASE
 )
+_FLIP_UNTIL_TAILS_BONUS_RE = re.compile(
+    r"flip a coin until you get tails\.\s*this attack does (\d+) more damage for each heads",
+    re.IGNORECASE,
+)
 
 
 def _coin_flip_bonus(text):
@@ -366,21 +382,36 @@ def _coin_flip_bonus(text):
     e.g. our own Riolu's Quick Attack ("Flip a coin. If heads, this attack
     does 20 more damage.", `damage: 10`) reads as a flat 10 everywhere in
     this codebase, silently dropping the other half of its real expected
-    damage. Returns the expected value of that bonus (half the stated
-    amount, since the flip is 50/50) for attack_score's general damage
-    estimate -- 0.0 when the text doesn't match.
+    damage. Returns the expected value of that bonus for attack_score's
+    general damage estimate -- 0.0 when the text doesn't match either
+    pattern below.
+
+    Two distinct coin-flip shapes appear in the card pool (verified against
+    the full ATTACK_DB, not just one card):
+    - A single 50/50 flip ("if heads, N more damage"): EV is half the
+      stated amount.
+    - "Flip a coin until you get tails" (4 attacks in the full pool,
+      including Mega Kangaskhan ex's Rapid-Fire Combo): the number of heads
+      before the first tails follows a geometric distribution with mean 1
+      for a fair coin, so EV is the *full* stated per-head amount, not half.
 
     Deliberately not used by attack_is_lethal: an earlier version added the
-    *full* stated bonus there too ("a coin flip that could end the game is
-    worth taking the chance on"), but A/B testing showed that reclassifying
-    a 50/50 shot as guaranteed-lethal-tier priority measurably hurt win rate
-    (see attack_is_lethal's docstring and STRATEGY_REPORT.md for the
-    evidence) -- committing to the gamble apparently costs more in forgone
-    guaranteed setup than it wins back in successful coin flips."""
-    m = _COIN_FLIP_BONUS_RE.search(text or "")
-    if not m:
-        return 0.0
-    return int(m.group(1)) / 2.0
+    single-flip pattern's *full* stated bonus there too ("a coin flip that
+    could end the game is worth taking the chance on"), but A/B testing
+    showed that reclassifying a 50/50 shot as guaranteed-lethal-tier
+    priority measurably hurt win rate (see attack_is_lethal's docstring and
+    STRATEGY_REPORT.md for the evidence) -- committing to the gamble
+    apparently costs more in forgone guaranteed setup than it wins back in
+    successful coin flips. Applying that same reasoning by extension to the
+    flip-until-tails pattern too, rather than re-deriving it separately."""
+    text = text or ""
+    m = _COIN_FLIP_BONUS_RE.search(text)
+    if m:
+        return int(m.group(1)) / 2.0
+    m = _FLIP_UNTIL_TAILS_BONUS_RE.search(text)
+    if m:
+        return float(int(m.group(1)))
+    return 0.0
 
 
 def attack_score(obs, attack_id):

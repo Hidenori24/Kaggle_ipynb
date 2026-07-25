@@ -311,6 +311,35 @@ def test_weakness_resistance_unchanged_when_our_active_unknown(sub):
     assert sub.apply_weakness_resistance(obs, 100) == 100
 
 
+def test_colorless_attacker_does_not_spuriously_match_resistance(sub):
+    # A CI run surfaced Mega Kangaskhan ex (756, energyType 0/Colorless)
+    # reading resistance as the int 0 rather than None in that environment
+    # (versus None in this one) -- pins the fix directly by injecting the
+    # exact ambiguous value into CARD_DB, since it can't otherwise be
+    # reproduced in an environment where it already reads as None.
+    real_entry = sub.CARD_DB[756]
+    fake_entry = dict(real_entry, resistance=0)
+    sub.CARD_DB[756] = fake_entry
+    try:
+        obs = _obs(active={"id": 756}, opp_active={"id": 756, "hp": 999})
+        assert sub.apply_weakness_resistance(obs, 100) == 100
+    finally:
+        sub.CARD_DB[756] = real_entry
+
+
+def test_colorless_attacker_does_not_spuriously_match_weakness(sub):
+    # Same guard, mirrored for weakness (never observed ambiguous in
+    # practice, but the same "0 is never a real value" invariant applies).
+    real_entry = sub.CARD_DB[756]
+    fake_entry = dict(real_entry, weakness=0)
+    sub.CARD_DB[756] = fake_entry
+    try:
+        obs = _obs(active={"id": 756}, opp_active={"id": 756, "hp": 999})
+        assert sub.apply_weakness_resistance(obs, 100) == 100
+    finally:
+        sub.CARD_DB[756] = real_entry
+
+
 def test_attack_is_lethal_true_only_thanks_to_weakness(sub):
     # Aura Jab (982): flat 130 damage. 130 < 200 (not lethal by the raw
     # field) but 130*2=260 >= 200 once Kangaskhan ex's Weakness to Fighting
@@ -357,6 +386,25 @@ def test_attack_score_includes_coin_flip_expected_value(sub):
     # + 10 (expected value of the 50/50 +20 bonus) = 20 -> score = 60+20/5.
     obs = _obs(active={"id": 333}, opp_active={"id": 333, "hp": 999})
     assert sub.attack_score(obs, 464) == 60.0 + 20.0 / 5.0
+
+
+# --- _coin_flip_bonus's "flip until you get tails" variant ----------------
+# Mega Kangaskhan ex's Rapid-Fire Combo (attackId 1092): "Flip a coin until
+# you get tails. This attack does 50 more damage for each heads.", flat
+# damage field = 200. The number of heads before the first tails is
+# geometrically distributed with mean 1 for a fair coin, so the expected
+# bonus is the *full* stated per-head amount (50), not half.
+
+def test_coin_flip_bonus_matches_flip_until_tails_pattern(sub):
+    text = sub.ATTACK_DB[1092]["text"]
+    assert sub._coin_flip_bonus(text) == 50.0  # full amount, mean 1 head
+
+
+def test_attack_score_includes_flip_until_tails_expected_value(sub):
+    # Neutral matchup (756 vs 756, no weakness/resistance): dmg = 200 (flat)
+    # + 50 (expected value of the flip-until-tails bonus) = 250.
+    obs = _obs(active={"id": 756}, opp_active={"id": 756, "hp": 999})
+    assert sub.attack_score(obs, 1092) == 60.0 + 250.0 / 5.0
 
 
 # --- _expected_discard_damage (Hammer-lanche-style "discard N now" text) --
