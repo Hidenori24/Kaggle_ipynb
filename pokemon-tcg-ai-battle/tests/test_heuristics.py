@@ -359,6 +359,25 @@ def test_attack_score_includes_coin_flip_expected_value(sub):
     assert sub.attack_score(obs, 464) == 60.0 + 20.0 / 5.0
 
 
+# --- _coin_flip_bonus's "flip until you get tails" variant ----------------
+# Mega Kangaskhan ex's Rapid-Fire Combo (attackId 1092): "Flip a coin until
+# you get tails. This attack does 50 more damage for each heads.", flat
+# damage field = 200. The number of heads before the first tails is
+# geometrically distributed with mean 1 for a fair coin, so the expected
+# bonus is the *full* stated per-head amount (50), not half.
+
+def test_coin_flip_bonus_matches_flip_until_tails_pattern(sub):
+    text = sub.ATTACK_DB[1092]["text"]
+    assert sub._coin_flip_bonus(text) == 50.0  # full amount, mean 1 head
+
+
+def test_attack_score_includes_flip_until_tails_expected_value(sub):
+    # Neutral matchup (756 vs 756, no weakness/resistance): dmg = 200 (flat)
+    # + 50 (expected value of the flip-until-tails bonus) = 250.
+    obs = _obs(active={"id": 756}, opp_active={"id": 756, "hp": 999})
+    assert sub.attack_score(obs, 1092) == 60.0 + 250.0 / 5.0
+
+
 # --- _expected_discard_damage (Hammer-lanche-style "discard N now" text) --
 
 def test_expected_discard_damage_matches_hammer_lanche_pattern(sub):

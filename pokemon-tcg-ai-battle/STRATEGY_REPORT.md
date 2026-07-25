@@ -749,6 +749,26 @@ Rocket Feathers系（「捨てた枚数×固定ダメージ」だが捨てる枚
 ロジックが原因である具体的な証拠は見つからず、レート/マッチメイキングの
 ドリフトないし通常の分散である可能性が高いという結論のままである。
 
+### 5.15 `_coin_flip_bonus`を「表が出るまで引き直す」型のコインフリップにも一般化
+
+デッキ本体の見直し（後述、デッキ候補の調査中）でMega Kangaskhan exを検討した際、
+その技「Rapid-Fire Combo」（`"Flip a coin until you get tails. This attack
+does 50 more damage for each heads."`、固定200ダメージ）が、5.11節で実装した
+`_coin_flip_bonus()`のどちらの既存パターンにも一致しないことに気づいた。
+これは「1回だけコインを投げる」型（期待値は表示ボーナスの半分）とは異なる、
+「表が出るまで投げ続ける」型で、表が出る回数は幾何分布（公正なコインなら
+平均1回）に従うため、期待値は表示ボーナスの**満額**になる。
+
+全`ATTACK_DB`を検索したところ、この型の技は同一の文言でカードプール全体に
+4種類存在すると確認（1枚だけの特殊ケースではない）。`_coin_flip_bonus()`に
+2つ目の正規表現を追加し、両パターンを区別して正しい期待値を返すよう拡張した。
+`attack_is_lethal()`側には5.11節と同じ理由で引き続き反映しない。
+
+自分のデッキ（v3）にはこの型の技を持つカードが存在しないため、自己対戦では
+今のところノーオペであり、単体テストで両パターンの期待値計算を直接確認した
+上で採用した——5.9節等と同じ「実データで検証済み・自己対戦で無害」という
+基準に基づく。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1662,6 +1682,22 @@ unbounded false-positive risk without visibility into hand contents, **neither w
 round** -- following the same "one instance isn't enough evidence to safely bound a fix" bar Section
 5.12 first applied. On the win-rate dip itself: no evidence was found tying it to PR #29; rating/
 matchmaking drift or ordinary variance remains the more likely explanation.
+
+### 5.15 Generalized `_coin_flip_bonus` to the "flip until you get tails" coin-flip shape
+
+While researching deck rebuild candidates (below), Mega Kangaskhan ex's attack "Rapid-Fire Combo"
+("Flip a coin until you get tails. This attack does 50 more damage for each heads.", flat damage 200)
+turned out not to match either existing pattern in `_coin_flip_bonus()` (Section 5.11). This is a
+distinct coin-flip shape from the single 50/50 flip already handled: the number of heads before the
+first tails follows a geometric distribution with mean 1 for a fair coin, so its expected value is the
+*full* stated per-head bonus, not half.
+
+A full-`ATTACK_DB` search confirmed this exact phrasing appears on 4 different attacks in the card pool
+(not a one-off). Added a second regex to `_coin_flip_bonus()` to handle it, with `attack_is_lethal()`
+still deliberately excluded for the same reason as Section 5.11. Our own deck (v3) has no attack with
+this shape, so this is currently a no-op in self-play; adopted on unit-test verification of both
+patterns' expected-value math, the same "verified against real data, no-op harmless in self-play" bar
+used elsewhere (e.g. Section 5.9).
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 
