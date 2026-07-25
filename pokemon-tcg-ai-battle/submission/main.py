@@ -208,7 +208,17 @@ def apply_weakness_resistance(obs, dmg):
     attack_score/attack_is_lethal only ever compared the raw `damage` field
     to the opponent's HP, so a hit that's actually lethal thanks to Weakness
     could be scored as merely a setup move, and a hit into a Resistant
-    target could be overvalued."""
+    target could be overvalued.
+
+    Deliberately excludes a match on type 0 (Colorless): a CI run surfaced
+    a case (Mega Kangaskhan ex, a Colorless-type `megaEx`, `energyType: 0`)
+    where the engine's "no resistance" field read as the int 0 rather than
+    the `None` this codebase otherwise always observes for it -- a real
+    audit of the full CARD_DB confirms weakness/resistance are never
+    legitimately 0 for any of the 1267 cards (Colorless can't be resisted
+    or be a weakness in this game's rules), so guarding against a spurious
+    0-vs-0 match on a Colorless attacker is always correct, not just a
+    workaround for whatever produced that one CI discrepancy."""
     if dmg <= 0:
         return dmg
     cur = obs.get("current")
@@ -222,9 +232,11 @@ def apply_weakness_resistance(obs, dmg):
         if not my_card or not opp_card:
             return dmg
         my_type = my_card.get("energyType")
-        if opp_card.get("weakness") == my_type:
+        weakness = opp_card.get("weakness")
+        resistance = opp_card.get("resistance")
+        if weakness not in (None, 0) and weakness == my_type:
             return dmg * 2
-        if opp_card.get("resistance") == my_type:
+        if resistance not in (None, 0) and resistance == my_type:
             return max(0, dmg - 30)
         return dmg
     except Exception:

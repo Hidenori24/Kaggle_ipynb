@@ -769,6 +769,35 @@ does 50 more damage for each heads."`、固定200ダメージ）が、5.11節で
 上で採用した——5.9節等と同じ「実データで検証済み・自己対戦で無害」という
 基準に基づく。
 
+### 5.16 `apply_weakness_resistance()`の「無抵抗＝0」誤判定を修正——CI上でのみ再現した
+環境依存バグ
+
+5.15節のPR提出後、CI上でのみ`test_attack_score_includes_flip_until_tails_expected_value`が
+一貫して失敗した（ローカルでは単体・フルスイートとも8回連続で成功）。CI側は常に
+同じ誤った値（期待値110に対し実際は104）を返しており、ランダムなflakinessでは
+なく環境依存の決定的な差だと判断した。
+
+差分を逆算すると、resistance分の-30が誤って適用されているのと一致した。
+`apply_weakness_resistance()`は`opp_card.get("resistance") == my_type`で判定して
+おり、`resistance`の「無抵抗」を表す値がローカルでは`None`だが、CI環境では`0`
+として読まれていた可能性が濃厚——ちょうどテストに使ったMega Kangaskhan exの
+`energyType`も`0`（無色）のため、`0 == 0`が成立し、無色アタッカーに対して
+スプリアスな「無色耐性」判定が発生していた。
+
+全`CARD_DB`を実データで確認したところ、`weakness`・`resistance`はどちらも
+1267種中一度も`0`という値を取らない（無色は弱点・抵抗の対象にならないという
+実際のゲームルールと一致）。つまり`0`は常に「無効」を意味するはずで、
+「0 vs 0」の一致を弱点・抵抗判定から明示的に除外する修正は、どちらの
+環境の実際の値がどうであれ常に正しい。`CARD_DB`に`resistance=0`/`weakness=0`
+を直接注入するテストで修正を固定した（ローカル環境では自然には再現しない
+ため、モンキーパッチで直接シミュレート）。
+
+この不整合自体の根本原因（なぜ環境によって`None`/`0`が変わるのか）は特定
+できていないが、現行の自分のデッキにも無色タイプのFarfetch'dが含まれており、
+実際のKaggle実行環境で同じ挙動が起きていれば、Farfetch'd自身の攻撃力評価に
+本番でも影響していた可能性がある。実害の有無に関わらず、実データで「0は
+常に無効」と確認できている以上、直す方が明確に正しい。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1698,6 +1727,31 @@ still deliberately excluded for the same reason as Section 5.11. Our own deck (v
 this shape, so this is currently a no-op in self-play; adopted on unit-test verification of both
 patterns' expected-value math, the same "verified against real data, no-op harmless in self-play" bar
 used elsewhere (e.g. Section 5.9).
+
+### 5.16 Fixed a "no resistance == 0" misread in `apply_weakness_resistance()` -- an environment-dependent bug that only reproduced on CI
+
+After Section 5.15's PR went up, `test_attack_score_includes_flip_until_tails_expected_value` failed
+consistently on CI (expected 110, got 104) while passing 8/8 times locally (isolated and full-suite
+runs alike). Since CI returned the exact same wrong value on two separate runs rather than a different
+value each time, this pointed to a deterministic environment difference, not random flakiness.
+
+Working backward from the 6-point gap (104 vs. the correct 110, i.e. a -30 applied where it shouldn't
+be): `apply_weakness_resistance()` compares `opp_card.get("resistance") == my_type`. The test's card
+(Mega Kangaskhan ex) has `energyType: 0` (Colorless) and no real resistance -- which reads as `None`
+locally, but apparently read as the int `0` on the CI runner. Since `my_type` is also `0` for this
+Colorless attacker, `0 == 0` spuriously matched as "resistant," incorrectly subtracting 30 damage.
+
+Auditing the full `CARD_DB` confirmed weakness/resistance are never legitimately `0` for any of the
+1267 cards (Colorless can't be resisted or be a weakness under this game's real rules), so excluding a
+`0`-vs-`0` match from both checks is correct regardless of which sentinel a given environment happens
+to produce. Pinned the fix with tests that directly monkeypatch `CARD_DB` to inject the ambiguous `0`
+value (the discrepancy doesn't reproduce naturally in this environment, where it already reads `None`).
+
+The root cause of the `None`-vs-`0` environment difference itself remains unidentified, but our own
+shipped deck's Farfetch'd is also Colorless-type -- if the same misread occurs in the real Kaggle
+runtime, it would have been quietly undervaluing Farfetch'd's own attack in every game where it should
+apply no resistance discount. Worth fixing regardless of whether that live impact is confirmed, since
+the "0 always means no value" invariant is independently verified against real data either way.
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 

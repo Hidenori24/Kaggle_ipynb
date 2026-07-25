@@ -96,6 +96,13 @@
   「表が出るまで投げ続ける」型のコインフリップ技（Mega Kangaskhan exの
   「Rapid-Fire Combo」等、カードプール全体で4種）を計算できていないことが判明し、
    一般化して対応した（詳細は[`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.15節参照）。
+   さらにその提出のCI上でのみ、`apply_weakness_resistance()`が「無抵抗」を
+   意味する値をローカルでは`None`・CI環境では`0`として読んでいる（原因は特定できず）
+   ことに起因する誤判定を発見。無色（`energyType`/`resistance`/`weakness`が`0`）は
+   実データ上どのカードにも実在しない値であることを確認した上で、`0`同士の一致を
+   弱点・抵抗判定から明示的に除外する修正を実施——自分のデッキのFarfetch'dも無色
+   タイプのため、本番環境で同じ誤読が起きていれば実害があった可能性がある
+   （詳細は[`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.16節参照）。
 4. 実測の勝率・カードプールの分析結果を Jupyter Notebook にまとめた
    （捏造データなし、すべて実エンジンでの実行結果）。
 

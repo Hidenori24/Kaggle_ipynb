@@ -311,6 +311,35 @@ def test_weakness_resistance_unchanged_when_our_active_unknown(sub):
     assert sub.apply_weakness_resistance(obs, 100) == 100
 
 
+def test_colorless_attacker_does_not_spuriously_match_resistance(sub):
+    # A CI run surfaced Mega Kangaskhan ex (756, energyType 0/Colorless)
+    # reading resistance as the int 0 rather than None in that environment
+    # (versus None in this one) -- pins the fix directly by injecting the
+    # exact ambiguous value into CARD_DB, since it can't otherwise be
+    # reproduced in an environment where it already reads as None.
+    real_entry = sub.CARD_DB[756]
+    fake_entry = dict(real_entry, resistance=0)
+    sub.CARD_DB[756] = fake_entry
+    try:
+        obs = _obs(active={"id": 756}, opp_active={"id": 756, "hp": 999})
+        assert sub.apply_weakness_resistance(obs, 100) == 100
+    finally:
+        sub.CARD_DB[756] = real_entry
+
+
+def test_colorless_attacker_does_not_spuriously_match_weakness(sub):
+    # Same guard, mirrored for weakness (never observed ambiguous in
+    # practice, but the same "0 is never a real value" invariant applies).
+    real_entry = sub.CARD_DB[756]
+    fake_entry = dict(real_entry, weakness=0)
+    sub.CARD_DB[756] = fake_entry
+    try:
+        obs = _obs(active={"id": 756}, opp_active={"id": 756, "hp": 999})
+        assert sub.apply_weakness_resistance(obs, 100) == 100
+    finally:
+        sub.CARD_DB[756] = real_entry
+
+
 def test_attack_is_lethal_true_only_thanks_to_weakness(sub):
     # Aura Jab (982): flat 130 damage. 130 < 200 (not lethal by the raw
     # field) but 130*2=260 >= 200 once Kangaskhan ex's Weakness to Fighting
