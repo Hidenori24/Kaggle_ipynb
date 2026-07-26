@@ -130,6 +130,40 @@ def test_active_in_danger_false_below_55_but_above_35_for_non_megaex(sub):
     assert sub.active_in_danger(_obs(active={"id": 333, "hp": 50, "maxHp": 100})) is False
 
 
+# --- Safeguard / attack-damage prevention ----------------------------------
+# Grounded in loss episode 88239597: Sylveon's Safeguard reduced Mega Lucario
+# ex's printed 130-damage Aura Jab to zero twice while the policy incorrectly
+# treated it as lethal instead of preparing a non-ex pivot.
+
+def test_opponent_active_prevents_damage_from_mega_ex(sub):
+    obs = _obs(active={"id": 678, "hp": 340}, opp_active={"id": 330, "hp": 120})
+    assert sub.opponent_active_prevents_damage(obs) is True
+
+
+def test_safeguard_attack_is_not_classified_as_lethal(sub):
+    obs = _obs(active={"id": 678, "hp": 340}, opp_active={"id": 330, "hp": 120})
+    assert sub.attack_is_lethal(obs, 982) is False
+    assert sub.attack_score(obs, 982) == 60.0
+
+
+def test_safeguard_does_not_block_non_ex_attacker(sub):
+    obs = _obs(active={"id": 333, "hp": 70}, opp_active={"id": 330, "hp": 120})
+    assert sub.opponent_active_prevents_damage(obs) is False
+
+
+def test_retreat_to_non_ex_outranks_blocked_attack(sub):
+    obs = _obs(
+        active={"id": 678, "hp": 340},
+        bench=[{"id": 333, "hp": 70}],
+        opp_active={"id": 330, "hp": 120},
+        opp_bench=[{"id": 43, "hp": 50}],
+    )
+    sel = {"context": 0}
+    retreat = {"type": sub.OPT_RETREAT}
+    aura_jab = {"type": sub.OPT_ATTACK, "attackId": 982}
+    assert sub.score_option(obs, sel, retreat) > sub.score_option(obs, sel, aura_jab)
+
+
 def test_prize_value_megaex_is_3(sub):
     assert sub.prize_value(sub.CARD_DB.get(678)) == 3  # Mega Lucario ex
 
@@ -488,4 +522,3 @@ def test_card_value_farfetchd_gets_no_evolution_bonus(sub):
     # it should score at its plain HP-based value with no bonus.
     farfetchd = sub.CARD_DB[123]
     assert sub.card_value(farfetchd) == farfetchd["hp"] / 10.0
-

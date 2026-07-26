@@ -243,6 +243,43 @@ def apply_weakness_resistance(obs, dmg):
         return dmg
 
 
+def opponent_active_prevents_damage(obs):
+    """Whether the opponent's Active blocks damage from our current attacker.
+
+    Episode 88239597 exposed a concrete blind spot: Sylveon's Safeguard
+    ("Prevent all damage ... from your opponent's Pokémon {ex}") made Aura
+    Jab deal zero, but the policy still classified its printed 130 damage as
+    lethal and repeated the attack instead of preparing a non-ex pivot.
+
+    The engine represents Mega Pokémon ex with ``megaEx=True`` and
+    ``ex=False``, even though card text's ``{ex}`` condition applies to both.
+    Keep this deliberately narrow: only model the observed, unambiguous
+    prevent-all-damage-from-ex wording rather than guessing at every possible
+    effect-card interaction.
+    """
+    cur = obs.get("current")
+    if not cur:
+        return False
+    try:
+        me = cur["players"][cur["yourIndex"]]
+        opp = cur["players"][1 - cur["yourIndex"]]
+        my_active = (me.get("active") or [None])[0]
+        opp_active = (opp.get("active") or [None])[0]
+        my_card = CARD_DB.get(my_active.get("id")) if my_active else None
+        opp_card = CARD_DB.get(opp_active.get("id")) if opp_active else None
+        if not my_card or not opp_card or not (my_card.get("ex") or my_card.get("megaEx")):
+            return False
+        skill_text = " ".join(s.get("text", "") for s in (opp_card.get("skills") or [])).lower()
+        normalized = skill_text.replace("’", "'")
+        return (
+            "prevent all damage" in normalized
+            and "attacks from your opponent's pokémon" in normalized
+            and "{ex}" in normalized
+        )
+    except Exception:
+        return False
+
+
 def card_value(card):
     """Rough heuristic value of a card: bigger/rarer Pokemon and useful
     trainers score higher. Used both to pick the *best* card (search, play,
@@ -424,6 +461,8 @@ def attack_score(obs, attack_id):
     if atk:
         dmg += _coin_flip_bonus(atk.get("text"))
     dmg = apply_weakness_resistance(obs, dmg)
+    if opponent_active_prevents_damage(obs):
+        dmg = 0
     score = 60.0 + dmg / 5.0
     opp_hp = get_opponent_active_hp(obs)
     if opp_hp is not None and opp_hp > 0 and dmg >= opp_hp:
@@ -611,6 +650,11 @@ def retreat_score(obs):
         if not active:
             return 15.0
         bench = p.get("bench") or []
+        if opponent_active_prevents_damage(obs):
+            for pokemon in bench:
+                card = CARD_DB.get(pokemon.get("id"))
+                if card and not (card.get("ex") or card.get("megaEx")):
+                    return 80.0  # pivot to an attacker that Safeguard does not block
         if active_in_danger(obs) and bench:
             return 45.0  # worth retreating a nearly-dead attacker
         return 5.0
@@ -709,6 +753,8 @@ def attack_is_lethal(obs, attack_id):
     atk = ATTACK_DB.get(attack_id)
     dmg = (atk.get("damage") if atk else 0) or 0
     dmg = apply_weakness_resistance(obs, dmg)
+    if opponent_active_prevents_damage(obs):
+        return False
     opp_hp = get_opponent_active_hp(obs)
     return opp_hp is not None and opp_hp > 0 and dmg >= opp_hp
 
@@ -767,7 +813,8 @@ def score_option(obs, sel, option):
     if t == OPT_NUMBER:
         return (2, float(option.get("number") or 0))
     if t == OPT_RETREAT:
-        tier = 8.7 if active_in_danger(obs) else 3
+        escaping_immunity = retreat_score(obs) >= 80.0
+        tier = 9.5 if escaping_immunity else (8.7 if active_in_danger(obs) else 3)
         return (tier, retreat_score(obs))
     if t == OPT_CARD:
         card = resolve_card_by_area(obs, sel, option.get("area"), option.get("index"), option.get("playerIndex"))
