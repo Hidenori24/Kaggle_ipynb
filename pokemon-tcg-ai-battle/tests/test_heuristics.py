@@ -27,11 +27,11 @@ def sub():
 
 
 def _obs(active=None, bench=None, hand=None, discard=None, opp_active=None, opp_bench=None, your_index=0,
-         hand_count=None, opp_hand_count=None):
+         hand_count=None, opp_hand_count=None, opp_discard=None):
     """Minimal synthetic `obs["current"]` with just the fields the helpers
     under test actually read."""
     me = {"active": [active] if active else [], "bench": bench or [], "hand": hand or [], "discard": discard or []}
-    opp = {"active": [opp_active] if opp_active else [], "bench": opp_bench or []}
+    opp = {"active": [opp_active] if opp_active else [], "bench": opp_bench or [], "discard": opp_discard or []}
     if hand_count is not None:
         me["handCount"] = hand_count
     if opp_hand_count is not None:
@@ -186,34 +186,39 @@ def test_prize_value_plain_ex_dict_is_2(sub):
     assert sub.prize_value({"ex": True, "megaEx": False}) == 2
 
 
-# --- opponent_lethal_threat_damage / active_in_danger's hand-scaling case --
+# --- opponent_best_lethal_damage / active_in_danger's live-threat check ---
 # Grounded in a real loss (episode 85847458, see STRATEGY_REPORT.md): our
 # full-HP (340/340) Mega Lucario ex was one-shot by Alakazam's "Powerful
 # Hand" ("place 2 damage counters on your opponent's Active Pokemon for
 # each card in your hand"), a threat invisible to any HP%-only check.
 
-def test_opponent_lethal_threat_damage_attacker_hand_scaling(sub):
-    # 743 = Alakazam, attack 1072 "Powerful Hand": 2 damage counters
-    # (=20 dmg) per card in *its own* (the opponent's) hand.
+def test_opponent_best_lethal_damage_attacker_hand_scaling(sub):
+    # 743 = Alakazam, attack 1072 "Powerful Hand": 2 damage counters (=20
+    # dmg each) per card in *its own* (the opponent's) 20-card hand -- 400
+    # base, then doubled to 800 since Mega Lucario ex (678) is weak to
+    # Psychic and Alakazam is a Psychic-type attacker. Unlike the old
+    # hand-scaling-only check, the generalized version now correctly
+    # applies Weakness/Resistance to this bonus too, same as any other
+    # damage source.
     obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
                opp_active={"id": 743, "energies": [{"id": 4}]}, opp_hand_count=20)
-    assert sub.opponent_lethal_threat_damage(obs) == 20 * 10 * 2  # == 400
+    assert sub.opponent_best_lethal_damage(obs) == 2 * 10 * 20 * 2  # == 800
 
 
-def test_opponent_lethal_threat_damage_zero_when_not_enough_energy(sub):
+def test_opponent_best_lethal_damage_zero_when_not_enough_energy(sub):
     # Powerful Hand needs 1 attached Energy; with none attached it isn't a
     # live threat yet, regardless of hand size.
     obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
                opp_active={"id": 743, "energies": []}, opp_hand_count=20)
-    assert sub.opponent_lethal_threat_damage(obs) == 0.0
+    assert sub.opponent_best_lethal_damage(obs) == 0.0
 
 
-def test_opponent_lethal_threat_damage_defender_hand_scaling(sub):
+def test_opponent_best_lethal_damage_defender_hand_scaling(sub):
     # 98 = Chandelure, attack 123 "Mind Ruler": 30 dmg per card in *our*
     # (the defender's) hand.
     obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340}, hand_count=5,
                opp_active={"id": 98, "energies": [{"id": 4}, {"id": 4}]})
-    assert sub.opponent_lethal_threat_damage(obs) == 30 * 5  # == 150
+    assert sub.opponent_best_lethal_damage(obs) == 30 * 5  # == 150
 
 
 def test_active_in_danger_true_for_lethal_hand_scaling_threat_at_full_hp(sub):
@@ -230,43 +235,110 @@ def test_active_in_danger_false_when_hand_scaling_threat_not_yet_lethal(sub):
     assert sub.active_in_danger(obs) is False
 
 
-# --- opponent_lethal_threat_damage's next-evolution-stage check -----------
+# --- opponent_best_lethal_damage's next-evolution-stage check -------------
 # Grounded in a second real loss (episode #86220242, see STRATEGY_REPORT.md
 # 5.12): the opponent evolved Kadabra (742, no hand-scaling attack) into
 # Alakazam (743, Powerful Hand) and attacked within the same turn, invisible
 # to a check that only looks at the active's *current* card. 742's own text
 # ("Super Psy Bolt") is a flat 30 damage with no hand-size scaling.
 
-def test_opponent_lethal_threat_damage_checks_next_evolution_stage(sub):
+def test_opponent_best_lethal_damage_checks_next_evolution_stage(sub):
     # Kadabra active, already carrying the 1 Psychic Energy Powerful Hand
     # needs (energy carries over through evolution in this engine) and a
     # large hand -- the same-turn evolve-into-Alakazam-and-attack threat.
+    # Doubled to 800 for the same Psychic-weakness reason as the test above.
     obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
                opp_active={"id": 742, "energies": [{"id": 4}]}, opp_hand_count=20)
-    assert sub.opponent_lethal_threat_damage(obs) == 20 * 10 * 2  # == 400
+    assert sub.opponent_best_lethal_damage(obs) == 2 * 10 * 20 * 2  # == 800
 
 
-def test_opponent_lethal_threat_damage_evolution_check_needs_energy_too(sub):
+def test_opponent_best_lethal_damage_evolution_check_needs_energy_too(sub):
     # Same Kadabra-could-evolve-to-Alakazam threat, but with no Energy
     # attached yet -- not affordable even after evolving, so not live.
     obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
                opp_active={"id": 742, "energies": []}, opp_hand_count=20)
-    assert sub.opponent_lethal_threat_damage(obs) == 0.0
+    assert sub.opponent_best_lethal_damage(obs) == 0.0
 
 
-def test_opponent_lethal_threat_damage_zero_when_no_evolution_has_hand_scaling(sub):
-    # Our own evolution line (Riolu -> Mega Lucario ex) has no hand-scaling
-    # attack anywhere in it -- confirms this check is a no-op in mirror
-    # self-play, same as the base hand-scaling check it extends.
+def test_opponent_best_lethal_damage_zero_when_no_energy_for_any_option(sub):
+    # 677 is a different print of "Riolu" than our own deck's 333, but
+    # shares the same name -- so EVOLUTIONS_BY_BASE_NAME still finds our
+    # own Mega Lucario ex (678) as a possible evolution target, same as it
+    # would for a real opponent mirroring this deck. With no Energy
+    # attached, neither Riolu's own flat-damage attack nor Mega Lucario
+    # ex's is affordable yet, so this is correctly still zero.
     obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
-               opp_active={"id": 677, "energies": [{"id": 4}]}, opp_hand_count=30)
-    assert sub.opponent_lethal_threat_damage(obs) == 0.0
+               opp_active={"id": 677, "energies": []}, opp_hand_count=30)
+    assert sub.opponent_best_lethal_damage(obs) == 0.0
+
+
+def test_opponent_best_lethal_damage_detects_mirror_evolution_flat_threat(sub):
+    # Same mirror-matchup setup as above, but now with the 1 Energy Aura
+    # Jab needs already attached -- previously invisible entirely (only
+    # hand-scaling attacks were checked here), now correctly flagged as a
+    # live flat-damage threat via the same evolution-lookahead.
+    obs = _obs(active={"id": 678, "hp": 130, "maxHp": 130},
+               opp_active={"id": 677, "energies": [{"id": 4}]})
+    assert sub.opponent_best_lethal_damage(obs) == 130.0
 
 
 def test_active_in_danger_true_for_evolution_stage_hand_scaling_threat(sub):
     obs = _obs(active={"id": 678, "hp": 340, "maxHp": 340},
                opp_active={"id": 742, "energies": [{"id": 4}]}, opp_hand_count=17)
     assert sub.active_in_danger(obs) is True
+
+
+# --- opponent_best_lethal_damage's generalization beyond hand-scaling -----
+# Task #17: rather than one bespoke regex per newly-discovered attack shape,
+# opponent_best_lethal_damage now reuses attack_score's *entire* damage-
+# estimation stack (flat damage, Weakness/Resistance, discard-pile bonus,
+# coin-flip EV, hand-scaling) against the opponent's board, so any of those
+# already-modeled patterns is caught automatically -- not just hand-scaling.
+
+def test_opponent_best_lethal_damage_flat_damage_attack(sub):
+    # 678 = Mega Lucario ex, attack 982 "Aura Jab": flat 130 damage, 1
+    # Fighting Energy. A flat-damage lethal hit was previously invisible to
+    # this check entirely (it only ever looked at hand-scaling text) --
+    # active_in_danger's HP%-ratio fallback could miss this too, e.g. for a
+    # Pokemon whose max HP is well above 130.
+    obs = _obs(active={"id": 333, "hp": 130, "maxHp": 130},
+               opp_active={"id": 678, "energies": [{"id": 4}]})
+    assert sub.opponent_best_lethal_damage(obs) == 130.0
+
+
+def test_opponent_best_lethal_damage_zero_when_flat_attack_not_affordable(sub):
+    obs = _obs(active={"id": 333, "hp": 130, "maxHp": 130},
+               opp_active={"id": 678, "energies": []})
+    assert sub.opponent_best_lethal_damage(obs) == 0.0
+
+
+def test_opponent_best_lethal_damage_applies_weakness_to_our_active(sub):
+    # 24 = weak to Fighting (see test_weakness_doubles_damage): Aura Jab's
+    # flat 130 doubles to 260 against it, well past a 200 HP threshold that
+    # the raw damage field alone would read as "not lethal."
+    obs = _obs(active={"id": 24, "hp": 200, "maxHp": 200},
+               opp_active={"id": 678, "energies": [{"id": 4}]})
+    assert sub.opponent_best_lethal_damage(obs) == 260.0
+
+
+def test_opponent_best_lethal_damage_applies_resistance_to_our_active(sub):
+    # 80 = resists Fighting (see test_resistance_reduces_damage_by_30): Aura
+    # Jab's flat 130 drops to 100, no longer lethal at 110 HP.
+    obs = _obs(active={"id": 80, "hp": 110, "maxHp": 110},
+               opp_active={"id": 678, "energies": [{"id": 4}]})
+    assert sub.opponent_best_lethal_damage(obs) == 100.0
+
+
+def test_opponent_best_lethal_damage_discard_pile_pattern(sub):
+    # 721 = Kyogre, attack 1042 "Riptide": 20 dmg for each Basic Energy card
+    # (cardType 5) in *the opponent's own* discard pile -- 3 = a Basic Water
+    # Energy. Same pattern attack_score already estimates for our own
+    # attacks (see _discard_pile_damage), now reused against the opponent's
+    # discard pile via _discard_pile_damage_from.
+    obs = _obs(active={"id": 333, "hp": 80, "maxHp": 80},
+               opp_active={"id": 721, "energies": [{"id": 4}]},
+               opp_discard=[{"id": 3}, {"id": 3}, {"id": 3}, {"id": 3}])
+    assert sub.opponent_best_lethal_damage(obs) == 80.0
 
 
 # --- hand_has_pokemon ------------------------------------------------------
