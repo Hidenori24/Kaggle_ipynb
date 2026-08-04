@@ -886,6 +886,87 @@ ex自身への進化先読みが発火することも確認——これは自分
 プラス寄りの結果だった。**採用**。この一般化により、`opponent_lethal_
 threat_damage()`と`_hand_scaling_attack_damage()`は完全に不要となり削除した。
 
+（※この51.2%という数字は、直後の5.19節で厳密な二項検定にかけたところ
+p=0.31——「有意な改善」とは言えない水準だった。詳細は5.19節参照。）
+
+### 5.19 A/Bハーネスの妥当性検証（task #23）——交替処理は不可欠だと判明、
+ただし判定基準（43〜57%）は大きく誤校正されていた
+
+「改善を積み上げているのに実戦成績が伸びない」という状況を受け、個別の
+改善案ではなく**測定基盤そのもの**を検証した。このプロジェクトの全ての
+採用/却下判断が同一形式の自己対戦ハーネスに乗っているため、そこに偏りが
+あれば過去の結論すべてが疑わしくなる。
+
+**検証方法**: ハーネスに**同一のエージェント**を与える（`submission/main.py`
+を2つの独立したモジュールとしてロード）。真の答えが必ず50%と分かっている
+唯一のケースなので、50%から系統的にずれれば、それはハーネス自身の偏りである。
+
+**結果1: 交替ありのハーネスは偏っていない。** 同一エージェント同士・交替
+あり（実際のA/Bと同一の形）で、2回の独立1,200戦をプールして
+1,208W-1,192L/2,400戦 = **50.33%**、厳密二項検定 p=0.76、Wilson 95%区間
+48.33〜52.33%——50%を正しく含む。**過去のA/B結果はこの点については信頼できる。**
+
+**結果2: このエンジンには実在する先手有利がある。** 全3回の実行を通じて
+盤面スロット0側の勝利を集計すると 1,882W-1,718L/3,600戦 = **52.28%**
+（p=0.0066、有意）。交替を無効化した対照実行では 640W-560L/1,200戦 =
+53.33%（p=0.023）と、同一エージェント同士なのに明確に偏る。つまり
+**ハーネスの`g % 2`による交替は装飾ではなく不可欠**で、これを「簡潔にしよう」
+として外すと全A/B結果が約2〜3ポイント上振れする——ノーオペを堂々とした
+勝利に見せるのに十分な大きさであり、実際に危険な罠である。
+
+**結果3（本題の問題）: 判定基準が誤校正されていた。** 一方で、これまで
+使ってきた「真の効果が皆無でも単発バッチは43〜57%振れる」という帯は、
+**N≈100でしか正しくない**。帰無仮説（変更に効果がなく1戦=公平なコイン）
+の下での95%区間は理論上こうなる:
+
+| 戦数 | 二項分布の95%区間 | 使っていた帯 |
+|---|---|---|
+| 300 | 44.3〜55.7% | 43〜57% |
+| 600 | 46.0〜54.0% | 43〜57% |
+| 1,800 | 47.7〜52.3% | 43〜57% |
+| 3,600 | 48.4〜51.6% | 43〜57% |
+
+3,600戦の結果を±7%の帯で判定するのは、その3,600戦で買った解像度の
+ほとんどを捨てているのと同じである。
+
+**過去の判断の再評価**（厳密な二項検定、両側、α=0.05）:
+
+| 判断 | 結果 | 再評価 |
+|---|---|---|
+| deck v3（採用） | 51.75%/3,600 | p=0.036 **有意** ✓ |
+| コインフリップEV（採用） | 51.4%/3,000 | p=0.125 有意でない |
+| 1手先読み（採用・5.18節） | 51.2%/1,800 | p=0.309 有意でない |
+| Drilbur（却下） | 47.2%/1,800 | p=0.018 有意な悪化 ✓ |
+| Zygarde ex（却下） | 40.6%/1,200 | p<0.001 有意な悪化 ✓ |
+| Boss's Orders（却下） | 44.2%/1,200 | p<0.001 有意な悪化 ✓ |
+
+**却下側の判断はすべて正しかった**（いずれも本物の悪化）。一方
+**採用側のうち2件は統計的有意性に達していない**——「効果がない」ことの
+証明ではなく、「その戦数では検出できないほど小さい」という意味である。
+これは「改善を積んでいるのにラダーが動かない」ことのかなり直接的な説明で、
+真の効果が1〜2ポイント程度の変更を、それを判別できない解像度で
+「採用」と判定し続けていた可能性が高い。
+
+**実務上の含意**——真の優位 d を95%で検出するのに必要な戦数:
+
+| 真の優位 | 必要戦数 |
+|---|---|
+| 5.0pp | 384 |
+| 3.0pp | 1,067 |
+| 2.0pp | 2,401 |
+| 1.0pp | 9,604 |
+
+つまり、これまでの標準だった「3回×600戦」は**約3ポイント以上の効果しか
+判別できない**。それ未満の改善を積み上げようとするなら、桁違いの戦数が
+必要になる。
+
+**対処**: `tools/ab_significance.py`を追加した（Wilson信頼区間＋厳密な
+二項検定＋「その戦数で判別可能な最小効果」を出力、ユニットテスト14件）。
+今後のA/Bは目視の帯ではなくこのツールの判定を使う。なお最初の実装は
+N=3,600でOverflowErrorを出した（`math.comb(3600, 1800)`は1084桁の整数で、
+アンダーフローした`0.5**1800`との乗算が失敗する）ため、lgammaによる
+log空間実装に書き換え、その回帰をテストで固定している。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1920,6 +2001,80 @@ Self-play A/B (the whole updated `main.py` vs. the pre-change baseline) came bac
 narrow, stable positive band matching the same bar used to ship deck v3 (51.75%) and the coin-flip EV
 fix (52.4%). **Adopted.** `opponent_lethal_threat_damage()` and `_hand_scaling_attack_damage()` are now
 fully superseded and were deleted.
+
+(That 51.2% was later put through a proper binomial test in Section 5.19 and came out at p=0.31 -- not
+a significant improvement. See that section.)
+
+### 5.19 Validating the A/B harness (task #23): the alternation is load-bearing, but the accept/reject threshold was badly miscalibrated
+
+With improvements piling up and real ladder results refusing to move, the next thing audited was not
+another candidate change but **the measurement apparatus itself**. Every ship/reject decision in this
+project rides on the same self-play harness shape, so a bias there would make every past conclusion
+suspect.
+
+**Method**: feed the harness **two identical agents** (`submission/main.py` loaded as two independent
+module objects). It's the one case where the true answer is known to be exactly 50%, so any systematic
+deviation from 50% is the harness's own bias, not a property of a change.
+
+**Finding 1: the harness, with alternation, is unbiased.** Identical agents, sides alternating (exactly
+the shape every real A/B uses): two independent 1,200-game runs pooled to 1,208W-1,192L / 2,400 games =
+**50.33%**, exact two-tailed binomial p = 0.76, Wilson 95% CI 48.33%-52.33% -- correctly bracketing
+50%. **Past A/B results are trustworthy on this axis.**
+
+**Finding 2: this engine has a real first-player advantage.** Tallying board-slot-0 wins across all
+three runs gives 1,882W-1,718L / 3,600 games = **52.28%** (p = 0.0066, significant). The control run
+with alternation disabled came in at 640W-560L / 1,200 = 53.33% (p = 0.023) -- a clear skew between
+two *identical* agents. So the harness's `g % 2` side-alternation is **load-bearing, not decorative**:
+anyone "simplifying" it away would inflate every future A/B by roughly 2-3 points, which is more than
+enough to dress up a no-op as a solid win. A genuine trap worth recording.
+
+**Finding 3 (the actual problem): the accept/reject threshold was miscalibrated.** The long-standing
+"even a true no-op swings 43-57% in a single batch" band is only right for N ~ 100. Under the null
+(the change does nothing, so each game is a fair coin) the theoretical 95% interval is:
+
+| games | binomial 95% interval | band in use |
+|---|---|---|
+| 300 | 44.3%-55.7% | 43-57% |
+| 600 | 46.0%-54.0% | 43-57% |
+| 1,800 | 47.7%-52.3% | 43-57% |
+| 3,600 | 48.4%-51.6% | 43-57% |
+
+Judging a 3,600-game result against a +-7% band discards most of the resolution those games bought.
+
+**Re-testing past verdicts** (exact two-tailed binomial, alpha = 0.05):
+
+| verdict | result | re-test |
+|---|---|---|
+| deck v3 (adopted) | 51.75% / 3,600 | p = 0.036 **significant** ✓ |
+| coin-flip EV (adopted) | 51.4% / 3,000 | p = 0.125 not significant |
+| 1-ply lookahead (adopted, §5.18) | 51.2% / 1,800 | p = 0.309 not significant |
+| Drilbur (rejected) | 47.2% / 1,800 | p = 0.018 significant regression ✓ |
+| Zygarde ex (rejected) | 40.6% / 1,200 | p < 0.001 significant regression ✓ |
+| Boss's Orders (rejected) | 44.2% / 1,200 | p < 0.001 significant regression ✓ |
+
+**Every rejection was correct** -- all were genuine regressions. But **two of the adoptions never
+reached significance**. That is not proof they do nothing; it means the effect is too small for that
+number of games to resolve. This is a fairly direct explanation for "we keep shipping improvements and
+the ladder doesn't move": changes whose true effect is on the order of 1-2 points were being ruled
+"adopted" at a resolution that cannot tell 1-2 points from zero.
+
+**Practical implication** -- games needed to resolve a true edge d at 95%:
+
+| true edge | games needed |
+|---|---|
+| 5.0 pp | 384 |
+| 3.0 pp | 1,067 |
+| 2.0 pp | 2,401 |
+| 1.0 pp | 9,604 |
+
+So the project's de-facto standard of "three 600-game runs" can only resolve effects of roughly **3
+points or more**. Chasing improvements below that requires an order of magnitude more games.
+
+**Response**: added `tools/ab_significance.py` (Wilson interval + exact two-tailed binomial test +
+the smallest effect the given batch size can resolve, with 14 unit tests). Future A/Bs use its verdict
+rather than an eyeballed band. Its first implementation raised OverflowError at N = 3,600
+(`math.comb(3600, 1800)` is a 1084-digit integer and multiplying it by an underflowing `0.5**1800`
+fails), so the exact test is computed in log space via `lgamma`, with that regression pinned by tests.
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 
