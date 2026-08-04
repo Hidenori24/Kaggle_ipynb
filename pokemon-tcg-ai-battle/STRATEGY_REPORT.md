@@ -843,6 +843,49 @@ Mach Cut（30ダメージ/1エネルギー）より弱く、緊急時の代替�
 可能性が高い。デッキ本体の改革は一旦ここで区切り、別の方向（1-ply先読み
 等）への投資を検討する材料とする。
 
+### 5.18 `opponent_best_lethal_damage()`——手札スケーリングだけでなく
+「相手の攻撃全体」を再利用してシミュレートする1手先読みへ一般化（task #17）
+
+5.14〜5.17節を通じて見つかった盲点（Powerful Hand、同ターン進化即死、
+ミル、Rocket Feathers）には共通点があった——どれも「今の盤面だけを見て、
+相手が次のターンに何をできるか」を実際にはシミュレートしていない、
+0手先読みの構造そのものが原因だった。カードごとに正規表現でパッチする
+方式は個別には正しく機能するが、次に見つかる未知のパターンには原理的に
+後手を取る。そこで、`opponent_lethal_threat_damage()`（手札スケーリング
+の正規表現のみを見る狭いチェック）を、**`attack_score()`が自分の技を
+評価する際に使っている推定ロジック一式**（固定ダメージ・トラッシュ枚数
+依存ボーナス・コインフリップ期待値・手札スケーリング・弱点/抵抗）を
+そのまま相手の攻撃にも適用する`opponent_best_lethal_damage()`へ一般化した。
+
+実装のポイントは「新しいロジックを追加する」のではなく「既存のダメージ
+推定ロジックを、attacker/defenderを明示的に渡せる形に切り出して両方向で
+再利用する」こと——`apply_weakness_resistance()`から`_weakness_resistance_
+damage(dmg, attacker_type, defender_card)`を、`_discard_pile_damage()`
+から`_discard_pile_damage_from(discard, text)`を切り出し、`_hand_scaling_
+attack_damage()`は同じ形の`_best_attack_damage()`に統合した。これにより、
+相手の技がどんな形（固定ダメージ・トラッシュ依存・コインフリップ・手札
+スケーリング）であっても、`attack_score()`が既に知っているパターンで
+あれば自動的に検知できるようになった——カードごとの個別対応が不要になる。
+
+対象範囲は意図的に絞った：相手のアクティブと（5.13節と同じ理由で）その
+1段先の進化のみを見て、ベンチや相手の手札の中身（見えない）はシミュレー
+トしない。「完全な1手探索」ではなく「今すぐ打てる技の総当たり」という、
+これまでの`opponent_lethal_threat_damage()`と同じ保守的な設計を維持した。
+
+検証で興味深い副産物が見つかった。一般化前は手札スケーリング技に弱点/
+抵抗を適用していなかったため、Alakazamの Powerful Hand がMega Lucario ex
+（Psychic弱点）に与える実際のダメージを**過小評価**していた（400ではなく
+本来800）——今回の一般化がこの過小評価も同時に修正した。また、ミラー
+マッチ（相手も"Riolu"という名前のカードを使っている場合）でMega Lucario
+ex自身への進化先読みが発火することも確認——これは自分のデッキを模倣する
+相手に対する現実的な脅威であり、意図した動作である。
+
+自己対戦A/B（現行の`main.py`全体 vs 変更前）は3回の独立600戦で54.3%・
+49.0%・50.2%（プールして51.2%/1,800戦、3回中2回が50%超え）——v3採用時
+（51.75%）・コインフリップEV採用時（52.4%）と同水準の、狭く安定した
+プラス寄りの結果だった。**採用**。この一般化により、`opponent_lethal_
+threat_damage()`と`_hand_scaling_attack_damage()`は完全に不要となり削除した。
+
 ## 6. 試して失敗したアイデア（正直な記録）
 
 「理屈の上では良さそうに見えたが、A/Bテストすると勝率を下げた」アイデアが複数あった。
@@ -1836,6 +1879,47 @@ measurement. Farfetch'd (with the `card_value()` evolution-base fix from v3) has
 distinct challengers for this exact slot (5 from Section 6's earlier history, plus these 3), suggesting
 it's a persistent local optimum here rather than an oversight waiting to be fixed. Deck-level reform is
 paused for now in favor of investing in a different lever (e.g. 1-ply lookahead, Section 7).
+
+### 5.18 `opponent_best_lethal_damage()`: generalizing beyond hand-scaling into a real 1-ply lookahead by reusing attack_score's own estimation stack (task #17)
+
+Every blind spot found across Sections 5.14-5.17 (Powerful Hand, the same-turn evolve-and-OHKO, mill,
+Rocket Feathers) shared a root cause: none of them were actually simulated -- the agent only ever
+scored the *current* board, never asked "what could the opponent's board already do to me next turn."
+Patching one regex per newly-discovered attack shape is inherently reactive; the next undiscovered
+pattern will always be invisible until it shows up in a lost replay. So `opponent_lethal_threat_damage()`
+(a narrow check limited to the hand-scaling regex patterns) was generalized into
+`opponent_best_lethal_damage()`, which reuses the *entire* damage-estimation stack `attack_score()`
+already trusts for our own attacks -- flat damage, discard-pile/discard-count conditional bonuses,
+coin-flip expected value, hand-size scaling, and Weakness/Resistance -- against the opponent's board.
+
+The implementation is not new logic bolted on top; it's the existing damage-estimation logic factored
+out to take an explicit attacker/defender pair instead of always reading `obs`'s own `yourIndex`, so it
+can run in either direction: `_weakness_resistance_damage(dmg, attacker_type, defender_card)` out of
+`apply_weakness_resistance()`, `_discard_pile_damage_from(discard, text)` out of `_discard_pile_damage()`,
+and `_hand_scaling_attack_damage()` folded into the more general `_best_attack_damage()`. Any attack
+shape `attack_score()` already knows how to estimate for our own attacks is now automatically checked
+for the opponent too -- no new regex needed for the next undiscovered pattern, as long as it fits a
+mold already modeled.
+
+Scope was deliberately kept narrow: only the opponent's active Pokemon and (per Section 5.13) its one
+evolution step ahead, not their bench, and no simulation of their hand contents (which `obs` can't see
+anyway). This is "evaluate every attack already affordable right now," not a full one-ply search over
+the opponent's whole board and hand -- the same conservative philosophy `opponent_lethal_threat_damage()`
+already used.
+
+Validation surfaced an interesting side effect: the old hand-scaling check never applied Weakness/
+Resistance to its own bonus, so it *underestimated* Alakazam's Powerful Hand against a Psychic-weak
+Mega Lucario ex (400 instead of the correct 800) -- the generalization fixes this underestimate as a
+byproduct. It also correctly flags a mirror-matchup risk that was previously invisible: if an opponent
+runs a card also named "Riolu" (a different print from our own), the evolution-lookahead now flags the
+flat-damage threat of them evolving into Mega Lucario ex too, since `EVOLUTIONS_BY_BASE_NAME` matches
+by name, not by our own deck's specific card ID.
+
+Self-play A/B (the whole updated `main.py` vs. the pre-change baseline) came back at 54.3%, 49.0%, and
+50.2% over three independent 600-game runs (pooled 51.2%/1,800 games, 2 of 3 batches favorable) -- a
+narrow, stable positive band matching the same bar used to ship deck v3 (51.75%) and the coin-flip EV
+fix (52.4%). **Adopted.** `opponent_lethal_threat_damage()` and `_hand_scaling_attack_damage()` are now
+fully superseded and were deleted.
 
 ## 6. Ideas We Tried and Rejected (an Honest Record)
 

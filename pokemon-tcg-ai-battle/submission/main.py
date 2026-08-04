@@ -231,16 +231,27 @@ def apply_weakness_resistance(obs, dmg):
         opp_card = CARD_DB.get(opp_active["id"]) if opp_active else None
         if not my_card or not opp_card:
             return dmg
-        my_type = my_card.get("energyType")
-        weakness = opp_card.get("weakness")
-        resistance = opp_card.get("resistance")
-        if weakness not in (None, 0) and weakness == my_type:
-            return dmg * 2
-        if resistance not in (None, 0) and resistance == my_type:
-            return max(0, dmg - 30)
-        return dmg
+        return _weakness_resistance_damage(dmg, my_card.get("energyType"), opp_card)
     except Exception:
         return dmg
+
+
+def _weakness_resistance_damage(dmg, attacker_type, defender_card):
+    """Shared Weakness/Resistance math, factored out of
+    apply_weakness_resistance so the exact same rule (including the
+    Colorless/0 guard above) can be applied the other direction too -- an
+    opponent-initiated attack against *our* active (see
+    opponent_best_lethal_damage) -- without faking an `obs` dict to route
+    through the yourIndex-based version above."""
+    if dmg <= 0 or not defender_card:
+        return dmg
+    weakness = defender_card.get("weakness")
+    resistance = defender_card.get("resistance")
+    if weakness not in (None, 0) and weakness == attacker_type:
+        return dmg * 2
+    if resistance not in (None, 0) and resistance == attacker_type:
+        return max(0, dmg - 30)
+    return dmg
 
 
 def opponent_active_prevents_damage(obs):
@@ -379,6 +390,22 @@ _DISCARD_PILE_ENERGY_DAMAGE_RE = re.compile(
 )
 
 
+def _discard_pile_damage_from(discard, text):
+    """Shared math for _discard_pile_damage -- factored out so the same
+    "N damage for each energy card in the attacker's discard pile" pattern
+    (Kyogre's Riptide) can be counted against *either* player's discard
+    pile, not just the caller's own (see opponent_best_lethal_damage,
+    which needs it for the opponent's discard pile). Returns None (not
+    0.0) when the text doesn't match, same convention as the wrapper
+    below."""
+    m = _DISCARD_PILE_ENERGY_DAMAGE_RE.search(text or "")
+    if not m:
+        return None
+    per_energy = int(m.group(1))
+    energy_count = sum(1 for c in (discard or []) if CARD_DB.get(c.get("id"), {}).get("cardType") in (5, 6))
+    return energy_count * per_energy
+
+
 def _discard_pile_damage(obs, text):
     """Kyogre's Riptide ("20 damage for each Basic Water Energy card in
     your discard pile") also reads `damage: 0` in the raw data, but unlike
@@ -389,18 +416,12 @@ def _discard_pile_damage(obs, text):
     the game goes on and energy piles up in the discard. Returns None (not
     0.0) when the text doesn't match, so callers can fall back to other
     damage-estimation patterns instead of assuming zero."""
-    m = _DISCARD_PILE_ENERGY_DAMAGE_RE.search(text or "")
-    if not m:
-        return None
-    per_energy = int(m.group(1))
     cur = obs.get("current")
     if not cur:
         return 0.0
     try:
-        p = cur["players"][cur["yourIndex"]]
-        discard = p.get("discard") or []
-        energy_count = sum(1 for c in discard if CARD_DB.get(c.get("id"), {}).get("cardType") in (5, 6))
-        return energy_count * per_energy
+        discard = cur["players"][cur["yourIndex"]].get("discard") or []
+        return _discard_pile_damage_from(discard, text)
     except Exception:
         return 0.0
 
@@ -521,12 +542,23 @@ def _evolutions_by_base_name():
 EVOLUTIONS_BY_BASE_NAME = _evolutions_by_base_name()
 
 
-def _hand_scaling_attack_damage(card, energy_count, attacker_hand_count, defender_hand_count):
-    """Best hand-size-scaling damage among `card`'s attacks that are already
-    affordable with `energy_count` Energy attached. Factored out of
-    opponent_lethal_threat_damage so the same check can be applied both to
-    the opponent's current active and (see that function's docstring) to
-    its next evolution stage."""
+def _best_attack_damage(card, energy_count, attacker_discard, attacker_hand_count,
+                         defender_hand_count, defender_card):
+    """Best damage among `card`'s attacks that are already affordable with
+    `energy_count` Energy attached, against `defender_card` -- the same
+    damage-estimation stack attack_score/attack_is_lethal already trust for
+    scoring *our own* attacks (flat damage, the discard-pile/discard-count
+    conditional bonuses, coin-flip expected value, hand-size scaling,
+    Weakness/Resistance), generalized to take an explicit attacker/defender
+    pair instead of always reading `obs`'s own yourIndex. This is what lets
+    opponent_best_lethal_damage price a threat from the opponent's side
+    using the exact same rules, rather than a separate, narrower duplicate
+    of them.
+
+    Deliberately conservative: only counts an attack already affordable
+    *right now* with `energy_count` (not "could afford after one more
+    attach"), since this is evaluated on our own turn, one attach before
+    the attacker's next turn actually happens."""
     if not card or not card.get("attacks"):
         return 0.0
     best = 0.0
@@ -537,55 +569,63 @@ def _hand_scaling_attack_damage(card, energy_count, attacker_hand_count, defende
         if energy_count < len(atk.get("energies") or []):
             continue  # not affordable yet -- not a live threat this turn
         text = atk.get("text") or ""
+        dmg = atk.get("damage") or 0
+        if dmg == 0:
+            discard_dmg = _discard_pile_damage_from(attacker_discard, text)
+            dmg = discard_dmg if discard_dmg is not None else _expected_discard_damage(text)
+        dmg += _coin_flip_bonus(text)
         m = _ATTACKER_HAND_DAMAGE_RE.search(text)
         if m:
-            best = max(best, int(m.group(1)) * 10 * attacker_hand_count)
-            continue
+            dmg = max(dmg, int(m.group(1)) * 10 * attacker_hand_count)
         m = _DEFENDER_HAND_DAMAGE_RE.search(text)
         if m:
-            best = max(best, int(m.group(1)) * defender_hand_count)
+            dmg = max(dmg, int(m.group(1)) * defender_hand_count)
+        dmg = _weakness_resistance_damage(dmg, card.get("energyType"), defender_card)
+        best = max(best, dmg)
     return best
 
 
-def opponent_lethal_threat_damage(obs):
-    """Best damage the opponent's *current active* could already deal to
-    our active right now, among attacks that scale with hand size rather
-    than a flat number -- a real loss replay (episode 85847458, see
-    STRATEGY_REPORT.md) showed our full-HP (340/340) Mega Lucario ex
-    one-shot by Alakazam's "Powerful Hand" ("place 2 damage counters on
-    your opponent's Active Pokemon for each card in your hand" -- 20 x a
-    20-card hand = 400 damage), a threat completely invisible to any
-    HP%-threshold retreat check since our active never dropped below 100%
-    HP before dying. Also covers the mirror-image pattern ("N damage for
-    each card in your opponent's hand", e.g. Mind Ruler/Resentful Refrain)
-    which scales with *our own* hand size instead.
+def opponent_best_lethal_damage(obs):
+    """Best damage the opponent's *current active* -- or its next evolution
+    stage, since Energy carries over through evolution (see
+    EVOLUTIONS_BY_BASE_NAME) -- could already deal to our active on their
+    next turn, using every damage pattern this codebase already estimates
+    for its own attacks: flat damage, discard-pile/discard-count
+    conditional bonuses, coin-flip expected value, hand-size scaling, and
+    Weakness/Resistance.
 
-    Also checks the opponent's active's *next evolution stage* the same
-    way, using the same Energy count -- a second real replay (episode
-    #86220242, see STRATEGY_REPORT.md 5.12) showed the exact blind spot
-    this leaves open: the opponent evolved Kadabra (no hand-scaling attack)
-    into Alakazam (Powerful Hand) and attacked with it all within their own
-    single turn, invisible to a check that only looks at the active's
-    *current* card. Energy carries over through evolution in this engine
-    (confirmed in that same replay), so the Energy gate still applies
-    correctly to the not-yet-evolved card. This does add unavoidable false
-    positives -- the evolution card might not even be in the opponent's
-    hand -- but retreating a turn early is far cheaper than eating a
-    same-turn evolve-and-OHKO, so erring toward caution here is the right
-    trade, consistent with prize_value's retreat-early bias for costly
-    Pokemon (see active_in_danger).
+    This subsumes what used to be a hand-scaling-only check
+    (`opponent_lethal_threat_damage`, built from two real losses: episode
+    85847458's full-HP Mega Lucario ex one-shot by Alakazam's "Powerful
+    Hand", and episode #86220242's same-turn Kadabra-into-Alakazam evolve-
+    and-OHKO -- see STRATEGY_REPORT.md 5.10/5.12). Both were really just
+    "some attack the opponent's board can already deliver, not accounted
+    for by an HP%-only check" -- a category, not a one-off -- so reusing
+    attack_score's full estimation stack here means a *new* still-
+    undiscovered attack shape doesn't need its own bespoke regex to be
+    caught, as long as it fits a pattern already modeled for our own
+    attacks (a flat-damage lethal hit that a coarse HP% threshold would
+    have missed, for instance).
 
-    Deliberately conservative otherwise: only counts an attack already
-    affordable *right now* (not "could afford after one more attach"),
-    since this is evaluated on our own turn, one attach before their next
-    turn actually happens -- a cheap approximation, not a perfect one-ply
-    simulation."""
+    Deliberately conservative, as before: only counts attacks already
+    affordable *right now* with currently-attached Energy, and only looks
+    at the opponent's *active* Pokemon and its one evolution step -- not
+    their whole bench, and not modeling a same-turn retreat/switch into a
+    different attacker. A cheap one-card-deep approximation, not a full
+    one-ply search over the opponent's whole board and hand."""
     cur = obs.get("current")
     if not cur:
         return 0.0
     try:
-        my_hand_count = cur["players"][cur["yourIndex"]].get("handCount") or 0
-        opp = cur["players"][1 - cur["yourIndex"]]
+        my_idx = cur["yourIndex"]
+        me = cur["players"][my_idx]
+        my_active = (me.get("active") or [None])[0]
+        my_card = CARD_DB.get(my_active["id"]) if my_active else None
+        if not my_card:
+            return 0.0
+        my_hand_count = me.get("handCount") or 0
+
+        opp = cur["players"][1 - my_idx]
         opp_active = (opp.get("active") or [None])[0]
         if not opp_active:
             return 0.0
@@ -593,17 +633,15 @@ def opponent_lethal_threat_damage(obs):
         if not opp_card:
             return 0.0
         opp_hand_count = opp.get("handCount") or 0
+        opp_discard = opp.get("discard") or []
         opp_energy_count = len(opp_active.get("energies") or [])
-        best = _hand_scaling_attack_damage(
-            opp_card, opp_energy_count, opp_hand_count, my_hand_count
-        )
-        for evo_card in EVOLUTIONS_BY_BASE_NAME.get(opp_card.get("name"), []):
-            best = max(
-                best,
-                _hand_scaling_attack_damage(
-                    evo_card, opp_energy_count, opp_hand_count, my_hand_count
-                ),
-            )
+
+        candidates = [opp_card] + EVOLUTIONS_BY_BASE_NAME.get(opp_card.get("name"), [])
+        best = 0.0
+        for card in candidates:
+            best = max(best, _best_attack_damage(
+                card, opp_energy_count, opp_discard, opp_hand_count, my_hand_count, my_card
+            ))
         return best
     except Exception:
         return 0.0
@@ -617,10 +655,10 @@ def active_in_danger(obs):
     Basic well before it is truly on death's door -- not just under the
     flat 35% that is the right call for a Pokemon that only costs 1 prize.
 
-    Also true regardless of HP% when the opponent's active already has a
-    live, affordable hand-size-scaling attack that would be lethal this
-    instant (see opponent_lethal_threat_damage) -- a threat no HP%
-    threshold can ever catch, since it can one-shot a full-HP Pokemon."""
+    Also true regardless of HP% when the opponent's board already has a
+    live, affordable attack of any kind that would be lethal this instant
+    (see opponent_best_lethal_damage) -- a threat no HP% threshold can ever
+    catch, since it can one-shot a full-HP Pokemon."""
     cur = obs.get("current")
     if not cur:
         return False
@@ -631,7 +669,7 @@ def active_in_danger(obs):
             return False
         max_hp = active.get("maxHp") or 1
         hp = active.get("hp", max_hp)
-        if opponent_lethal_threat_damage(obs) >= hp:
+        if opponent_best_lethal_damage(obs) >= hp:
             return True
         ratio = hp / max_hp
         threshold = 0.55 if prize_value(CARD_DB.get(active.get("id"))) >= 3 else 0.35
