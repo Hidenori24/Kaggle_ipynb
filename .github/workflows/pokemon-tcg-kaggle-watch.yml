@@ -5,11 +5,14 @@ name: pokemon-tcg-ai-battle Kaggle submission watch
 # submissions` on a schedule, and post a comment on the tracking Issue only
 # for results that haven't been reported yet (matched by a fingerprint of
 # the row, so a status/score change is treated as new). It also polls the
-# latest submission's individual match episodes (win/loss/draw, opponents,
-# errors) via the kagglesdk python client, since the public score alone
-# doesn't say much for this simulation-based competition -- see
-# tools/kaggle_watch.py. Any losses since the last check have their replay
-# JSON downloaded and attached to this run as a workflow artifact.
+# individual match episodes (win/loss/draw, opponents, errors) of each of the
+# most recently submitted agents -- Kaggle keeps more than one playing on the
+# ladder at a time, so reporting only the newest one hid the results of every
+# other still-active submission -- via the kagglesdk python client, since the
+# public score alone doesn't say much for this simulation-based competition.
+# See tools/kaggle_watch.py (KAGGLE_WATCH_SUBMISSIONS overrides how many).
+# Any losses since the last check have their replay JSON downloaded and
+# attached to this run as a workflow artifact.
 # Also runnable manually to check right now.
 #
 # One-time setup: same KAGGLE_USERNAME / KAGGLE_KEY secrets as the other

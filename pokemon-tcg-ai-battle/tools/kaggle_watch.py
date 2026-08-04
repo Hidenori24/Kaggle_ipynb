@@ -9,9 +9,10 @@ way to find out is to poll. This script is meant to be run on a schedule
    comment whenever a submission's status/score changes (fingerprinted so
    pending -> complete produces a new comment instead of a duplicate).
 2. Episode-level (this competition is a simulation/ladder, not a single
-   scored prediction -- the public score alone doesn't say much): for the
-   most recent submission, polls its individual match episodes via the
-   `kagglesdk` python client (not exposed by the plain `kaggle` CLI table),
+   scored prediction -- the public score alone doesn't say much): for each
+   of the most recent submissions (see WATCHED_SUBMISSIONS -- Kaggle keeps
+   more than one playing at a time), polls its individual match episodes via
+   the `kagglesdk` python client (not exposed by the plain `kaggle` CLI table),
    aggregates win/loss/draw counts, opponents faced, and any crash/timeout/
    invalid-action errors since the last check, and downloads the replay
    JSON for any losses so they land in this run's GitHub Actions artifact --
@@ -36,6 +37,17 @@ import sys
 
 COMPETITION = "pokemon-tcg-ai-battle"
 REPLAY_DIR = "kaggle_replays"  # uploaded as a workflow artifact by the caller
+
+# How many of the most recent submissions to report *episode-level* detail for.
+# Kaggle keeps more than one submission playing on the ladder at a time -- the
+# public score of an older submission keeps moving long after a newer one is
+# uploaded, which only happens if it's still being matched into games (directly
+# observed: two submissions' scores both drifting across 30+ consecutive polls).
+# This used to report episodes for `max(rows, key=date)` only, so all the
+# win/loss/replay detail for every *other* still-active submission was silently
+# dropped -- it looked like only one agent was battling when in fact several
+# were. Overridable via KAGGLE_WATCH_SUBMISSIONS for a one-off wider sweep.
+WATCHED_SUBMISSIONS = int(os.environ.get("KAGGLE_WATCH_SUBMISSIONS", "2"))
 
 
 # ---------------------------------------------------------------------------
@@ -319,24 +331,20 @@ def post_episode_summary(issue_number, submission_ref, summary, saved_replay_ids
     return True
 
 
-def report_episodes(issue_number, latest_submission_row):
-    ref = latest_submission_row.get("ref")
+def report_episodes(api, issue_number, submission_row):
+    ref = submission_row.get("ref")
     if not ref:
         return
-    from kaggle.api.kaggle_api_extended import KaggleApi
-
-    api = KaggleApi()
-    api.authenticate()
 
     since = fetch_last_reported_episode_id(issue_number, ref)
     summary = summarize_episodes(api, int(ref), since)
     saved = download_loss_replays(api, summary["loss_episode_ids"], REPLAY_DIR) if summary["loss_episode_ids"] else []
     diagnostic_lines = summarize_loss_diagnostics(saved, REPLAY_DIR, load_own_deck_sorted()) if saved else []
     if post_episode_summary(issue_number, ref, summary, saved, diagnostic_lines):
-        print(f"posted episode summary: {summary['new_count']} new episode(s), {len(saved)} loss replay(s) saved, "
-              f"{len(diagnostic_lines)} loss diagnostic(s) parsed")
+        print(f"submission {ref}: posted episode summary, {summary['new_count']} new episode(s), "
+              f"{len(saved)} loss replay(s) saved, {len(diagnostic_lines)} loss diagnostic(s) parsed")
     else:
-        print("no new finished episodes since last check")
+        print(f"submission {ref}: no new finished episodes since last check")
 
 
 # ---------------------------------------------------------------------------
@@ -355,14 +363,29 @@ def main():
     new_status_count = report_submission_status(issue_number, rows)
     print(f"{len(rows)} submissions checked, {new_status_count} new status comment(s) posted.")
 
-    latest = max(rows, key=lambda r: r.get("date", ""))
+    # Report episodes for the N most recent submissions, not just the single
+    # newest one -- see WATCHED_SUBMISSIONS. Each submission's watermark and
+    # summary comment are already keyed by its own ref, so they stay
+    # independent; a submission Kaggle has stopped matching simply reports
+    # "no new finished episodes" every poll and costs one extra API call.
+    watched = sorted(rows, key=lambda r: r.get("date", ""), reverse=True)[:WATCHED_SUBMISSIONS]
     try:
-        report_episodes(issue_number, latest)
+        from kaggle.api.kaggle_api_extended import KaggleApi
+
+        api = KaggleApi()
+        api.authenticate()
+        for row in watched:
+            # Per-submission try/except so one bad ref can't cost us the
+            # others' summaries (the outer handler would skip the rest).
+            try:
+                report_episodes(api, issue_number, row)
+            except (SystemExit, Exception) as e:
+                print(f"episode summary failed for submission {row.get('ref')} (non-fatal): {e}", file=sys.stderr)
     except (SystemExit, Exception) as e:
         # Episode-level detail is a nice-to-have on top of the status
         # comment above, which has already been posted by this point --
         # don't let an auth hiccup or an unexpected API shape fail the run.
-        print(f"episode summary failed (non-fatal): {e}", file=sys.stderr)
+        print(f"episode reporting failed (non-fatal): {e}", file=sys.stderr)
 
     return 0
 
