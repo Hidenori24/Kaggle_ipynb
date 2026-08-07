@@ -1139,21 +1139,75 @@ log空間実装に書き換え、その回帰をテストで固定している�
   エネルギーを消費する変更は一貫して効果が出にくい**という傾向が、今回で3例目、
   さらに強く裏付けられた形になる。**不採用**。
 
+### 5.20 ネイティブの探索APIを発見——エンジンは元々「エージェント側でシミュレーション
+する」設計だった（ただしシグネチャ未解決・実装は保留）
+
+5.19節で「微修正の積み上げでは構造的に届かない」ことが数値で確定したため、
+方向性そのものを探し直した結果、**今まで完全に見落としていた事実**に行き当たった。
+
+**発見1: `obs["search_begin_input"]` は毎ターン、手番側に渡されている。**
+このフィールドは`docs/ENGINE_NOTES.md`で長らく「内部エンジン用のraw dataで、
+通常のエージェント実装では未使用」と記述していたが、誤りだった。`cabt.py`の
+`interpreter()`が`o["search_begin_input"] = obs["search_begin_input"]`と
+**アクティブ側の観測にのみ**設定しており、実測でも序盤84文字→中盤536文字と
+局面の情報量に応じて伸びるASCII文字列が取得できた。しかも可視化データ生成時には
+`obs.pop("search_begin_input")`で明示的に除去されており、「エージェントに渡す情報」
+として意図的に区別されている。
+
+**発見2: `libcg.so`は`SearchBegin`/`SearchStep`/`SearchEnd`/`SearchRelease`を
+エクスポートしているが、Pythonラッパー（`cg/sim.py`）は一切配線していない。**
+`sim.py`が`argtypes`/`restype`を設定しているのは`BattleStart`/`BattleFinish`/
+`GetBattleData`/`Select`/`VisualizeData`だけである。バイナリ内には`searchId`という
+文字列も存在する。
+
+**発見3**: `SearchStep`の戻り値は`{"state": ..., "error": N}`形式のJSON（実測）。
+`error=30`は不正選択に対応し、`game.py`が`Select`の戻り値で`err == 30`を特別扱い
+しているのと整合する。また1手あたりの`actTimeout`は**0（実質無制限）**で、
+エージェントがシミュレーションを回すことを想定した設計と符合する。
+
+つまり「盤面を複製して実際に手を試す」のはハックではなく**想定された機能**であり、
+ヒューリスティックで手を評価する現行方式から、実際に試して結果で選ぶ方式への
+質的転換が原理的に可能だと分かった。
+
+**ただし実装は保留した。** ヘッダファイルが同梱されておらず、ctypesシグネチャを
+推測で当てる必要があるが、結果が不安定だった:
+
+- `SearchBegin(char*)`（`c_char_p`単体）→ `double free or corruption`でクラッシュ。
+  Goのcgoは`string`引数を`GoString{ptr, len}`構造体の値渡しにするため`char*`単体は
+  誤りだが、`GoString`を定義して渡す形も同様にクラッシュした。
+- `SearchBegin(ubyte*, int)` → 序盤の短い種（84文字）では値を返したが、
+  **中盤の現実的な種（370〜536文字）では再現性なくクラッシュ**。戻り値も
+  `0x9284e0`と`0x7fa6e79c01b0`のように呼び出しごとに一貫せず、正常な呼び出しでは
+  なく**未定義動作を踏んでいる**と判断した。
+
+このコンペではクラッシュ・タイムアウトが即敗北であり、**推測シグネチャのまま
+提出物にセグフォルトのリスクを持ち込む価値はない**。正しいシグネチャが判明する
+までは進まない、という判断である（`search_begin_input`は明らかにエージェント向けの
+公開機能なので、コンペ公式ドキュメントやフォーラムに仕様が記載されている可能性が高い）。
+
+残っている中で最もリターンの大きい方向性として記録しておく（詳細な実測結果は
+`docs/ENGINE_NOTES.md` 9章）。
+
 ## 7. 現状と今後の課題
 
 デッキ乗り換え後も改善の余地は大きい。今後の改善候補:
 
 1. ~~弱点・抵抗の反映~~ → 5.5節で検証・実装済み。
-2. **簡易先読み**: 「この攻撃をした場合、次の相手の番で倒され返すか」等、1手先を
-   考慮した評価を導入する。
+2. ~~簡易先読み~~ → 5.18節で`opponent_best_lethal_damage()`として実装（ただし
+   5.19節の厳密検定ではp=0.309で有意性未達）。**より本質的な先読みは下記6番へ発展。**
 3. **新デッキの追加チューニング**: `Boss's Orders`（相手の弱いベンチを狙い撃ち）や
    `Judge`（手札リセット）は現在の`score_option()`では他の汎用トレーナーと同じ扱いしか
    受けておらず、これらの妨害効果に特化した評価はまだ入れていない。
-4. **他アーキタイプとの継続比較**: 3章の選定はダメージ／エネルギー比という単一の軸での
-   スクリーニングであり、`Mega Gardevoir ex`系のエネルギー加速アーキタイプ等、他の強い
-   候補との直接対決A/Bテストはまだ行っていない。
-5. **リプレイ解析の継続**: 今回のように実戦データから具体的な問題を見つけて修正する
-   サイクルを継続する。
+   （なお`Boss's Orders`自体は5.9節で実装・検証の末に不採用となっている。）
+4. ~~他アーキタイプとの継続比較~~ → 5.17節でMega Kangaskhan ex／Mega Zygarde ex／
+   Drilburの3候補を実測し全て不採用。Farfetch'd入りv3は通算8種類の代替案に対して
+   優位を保っており、この枠は持続的な局所最適解の可能性が高い。
+5. **リプレイ解析の継続**: 実戦データから具体的な問題を見つけて修正するサイクルを継続する。
+6. **【最優先】ネイティブ探索APIの活用**（5.20節）: `SearchBegin`/`SearchStep`の
+   正しいctypesシグネチャを特定し、実際のロールアウトに基づく探索エージェントへ移行する。
+   5.19節で「3回×600戦では3ポイント未満の効果は判別できない」ことが確定し、
+   5.17節でデッキ側の伸びも尽きたため、**質的に異なるアプローチが必要**であり、
+   これが唯一それに該当する。ただしシグネチャ推測での実装は禁止（クラッシュ＝即敗北）。
 
 ---
 
@@ -2244,19 +2298,72 @@ We record them here so they aren't retried blind.
   come out ahead** — its win condition is too tightly coupled to keeping the current attacker
   fed. **Rejected.**
 
+### 5.20 Discovered a native search API: the engine was designed for agent-side simulation all along (signatures unsolved, implementation deliberately deferred)
+
+Once Section 5.19 established numerically that stacking micro-patches structurally cannot get
+there, the direction itself was re-examined — which turned up a fact this project had **completely
+missed**.
+
+**Finding 1: `obs["search_begin_input"]` is handed to the active player every single turn.**
+`docs/ENGINE_NOTES.md` had long described this field as "raw data for the internal engine, unused
+by normal agent implementations". That was wrong. `cabt.py`'s `interpreter()` sets
+`o["search_begin_input"] = obs["search_begin_input"]` **on the active player's observation only**,
+and it reads live as an ASCII string that grows with the state (84 chars in the opening, 536 chars
+mid-game). Tellingly, the visualizer path explicitly strips it with
+`obs.pop("search_begin_input")` — so it is deliberately treated as *information for the agent*.
+
+**Finding 2: `libcg.so` exports `SearchBegin` / `SearchStep` / `SearchEnd` / `SearchRelease`, and
+the Python wrapper (`cg/sim.py`) wires up none of them.** `sim.py` only sets `argtypes`/`restype`
+for `BattleStart`, `BattleFinish`, `GetBattleData`, `Select` and `VisualizeData`. The binary also
+contains a `searchId` string.
+
+**Finding 3**: `SearchStep` returns JSON of the form `{"state": ..., "error": N}` (observed), with
+`error=30` corresponding to an invalid selection — consistent with `game.py` special-casing
+`err == 30` on `Select`'s return. And per-decision `actTimeout` is **0 (effectively unlimited)**,
+which fits a design that expects agents to run simulations.
+
+In other words, cloning the board and actually trying moves is not a hack but an **intended
+capability**, making a qualitative shift possible: from scoring moves heuristically to trying them
+and choosing on the result.
+
+**Implementation was nonetheless deferred.** No header ships with the package, so the ctypes
+signatures have to be guessed, and the results were unstable:
+
+- `SearchBegin(char*)` (a bare `c_char_p`) → crashes with `double free or corruption`. Go's cgo
+  maps a `string` parameter to a `GoString{ptr, len}` struct passed *by value*, so a bare `char*`
+  is wrong — but defining `GoString` and passing that crashed as well.
+- `SearchBegin(ubyte*, int)` → returned a value for a short 84-char opening seed, but **crashes
+  non-reproducibly on realistic mid-game seeds (370-536 chars)**. The return value was also
+  inconsistent across calls (`0x9284e0` vs `0x7fa6e79c01b0`), indicating **undefined behaviour
+  rather than a working call**.
+
+In this competition a crash or timeout is an instant loss, so **there is no value in carrying
+segfault risk into the submitted agent on guessed signatures**. The decision is to not proceed
+until the real signatures are known (likely documented in the competition's own docs or forum,
+given that `search_begin_input` is plainly an agent-facing feature).
+
+Recorded as the highest-ceiling direction remaining (full measurements in `docs/ENGINE_NOTES.md`
+Section 9).
+
 ## 7. Current Standing and Future Work
 
 There is still significant room for improvement after the deck switch. Candidate next steps:
 
 1. ~~Model weakness/resistance~~ → verified and implemented, see Section 5.5.
-2. **Add shallow lookahead** — e.g. "would this attack leave us open to a KO next turn?" — rather
-   than purely static per-turn scoring.
-3. **Tune the new deck's disruption cards further** — `Boss's Orders` (pulling a specific
-   Benched Pokemon into the Active Spot) and `Judge` (resetting both hands) are currently scored
-   like any other generic trainer; we haven't yet added situational logic specific to their
-   disruption value.
-4. **Compare against more archetypes** — Section 3's deck selection screened on a single axis
-   (damage-per-Energy); we haven't yet run a direct A/B test against other strong candidates like
-   a `Mega Gardevoir ex`-style energy-acceleration archetype.
+2. ~~Add shallow lookahead~~ → implemented as `opponent_best_lethal_damage()` in Section 5.18
+   (though Section 5.19's proper test put it at p=0.309, short of significance). **The deeper
+   version of this is now item 6 below.**
+3. **Tune the new deck's disruption cards further** — `Judge` (resetting both hands) is currently
+   scored like any other generic trainer; we haven't yet added situational logic specific to its
+   disruption value. (`Boss's Orders` itself was implemented, measured and rejected in Section 5.9.)
+4. ~~Compare against more archetypes~~ → Section 5.17 measured three candidates (Mega Kangaskhan
+   ex, Mega Zygarde ex, Drilbur) and rejected all of them. The Farfetch'd-based v3 has now
+   outlasted 8 distinct challengers, suggesting a persistent local optimum.
 5. **Keep mining match replays** — continue the cycle of finding concrete, evidence-backed issues
    from real match data and fixing them, as demonstrated in Section 5.
+6. **[TOP PRIORITY] Exploit the native search API** (Section 5.20): identify the correct ctypes
+   signatures for `SearchBegin`/`SearchStep` and move to a genuine rollout-based search agent.
+   Section 5.19 established that three 600-game runs cannot resolve effects below ~3 points, and
+   Section 5.17 exhausted the deck axis — so **a qualitatively different approach is required**,
+   and this is the only candidate that qualifies. Implementing on guessed signatures is off the
+   table (a crash is an instant loss).
