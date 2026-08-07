@@ -34,7 +34,7 @@ env.run([agent_a, agent_b])
 | `select` | 現在の意思決定要求。`None` ならデッキ提出フェーズ。 |
 | `current` | 盤面全体のスナップショット（自分・相手の場、手札枚数など）。まれに `None` になる（後述の注意点）。 |
 | `logs` | 直近のイベントログ（型番号ベース、詳細は未解読）。 |
-| `search_begin_input` | 内部エンジン用のraw dataで、通常のエージェント実装では未使用。 |
+| `search_begin_input` | **エージェント側でシミュレーション（探索）を行うための、局面のシリアライズ済み種データ。** 「内部用で未使用」と長く誤解していたが、実際には手番側に毎ターン渡される公開情報で、ネイティブの`SearchBegin`に食わせることを意図した入力である。詳細は9章。 |
 
 ⚠️ **注意**: `current` が `None` になるフレームが低確率で観測された（数百戦に1回程度）。
 `select` が非 `None` でも `current` が `None` の可能性があるため、必ず `None` チェックを入れること。
@@ -274,3 +274,64 @@ attacks = json.loads(lib.AllAttack())  # 1556技
   `cardId`+`serial`）, `type:6`/`type:7`=カード移動（`fromArea`/`toArea`、`toArea:3`＝トラッシュ
   への移動＝多くはKO）と推定できる。これだけで「誰が何にどれだけダメージを与え、何がKOされたか」
   の再構築が可能。
+
+## 9. ネイティブの探索API（`SearchBegin` / `SearchStep` / `SearchEnd` / `SearchRelease`）
+
+**このエンジンは「エージェント側で盤面を複製してシミュレーションする」ことを想定して
+設計されている。** 長らく見落としていたが、以下は全て実測で確認済みの事実である。
+
+### 9.1 確認済みの事実
+
+1. **`obs["search_begin_input"]` は手番側に毎ターン渡される。**
+   `envs/cabt/cabt.py` の `interpreter()` に
+   `o["search_begin_input"] = obs["search_begin_input"]` という行があり（アクティブ側の
+   観測にのみ設定）、`cg/game.py` の `_get_battle_data()` が
+   `ctypes.string_at(sd.data, sd.count).decode("ascii")` で生成している。
+   実測では序盤84文字→中盤536文字と、局面の情報量に応じて伸びるASCII文字列
+   （例: `AGEAjD/AGEAboqAGEAEB-+CB7-pIDw-UM8-...`）。
+   なお可視化用データを作る際は `obs.pop("search_begin_input")` で明示的に捨てられており
+   （`cabt.py`）、「エージェントに渡す情報」として意図的に区別されていることが分かる。
+
+2. **`libcg.so` は探索用シンボルをエクスポートしているが、Pythonラッパーは配線していない。**
+   `nm -D --defined-only libcg.so` で確認できるエクスポート関数は
+   `AgentStart` / `AllAttack` / `AllCard` / `BattleFinish` / `BattleStart` /
+   `GameInitialize` / `GetBattleData` / **`SearchBegin` / `SearchEnd` /
+   `SearchRelease` / `SearchStep`** / `Select` / `VisualizeData`。
+   このうち`cg/sim.py`が`argtypes`/`restype`を設定しているのは
+   `BattleStart` / `BattleFinish` / `GetBattleData` / `Select` / `VisualizeData` のみで、
+   **`Search*`の4つは完全に未使用**。バイナリ内には`searchId`という文字列もある。
+
+3. **`SearchStep`の戻り値は `{"state": ..., "error": N}` という形のJSON**（実測）。
+   `error=30` は不正な選択に対応する（`cg/game.py` が `Select` の戻り値で
+   `err == 30` を特別扱いしているのと整合）。
+
+4. **1手あたりの制限時間 `actTimeout` は 0**（`make("cabt").configuration`）で、
+   実質的に無制限。`runTimeout` は2000秒。エージェントがシミュレーションを回すことを
+   想定した設計と符合する。
+
+### 9.2 未解決：ctypesシグネチャ（⚠️ 推測での使用は危険）
+
+**シグネチャは解けていない。** ヘッダファイルはパッケージに同梱されておらず、
+推測で当てた結果は次のように不安定だった:
+
+- `SearchBegin(char*)`（`c_char_p`単体）→ `double free or corruption` でクラッシュ。
+  Goのcgoは`string`引数を`GoString{ptr, len}`構造体の**値渡し**にするため、
+  `char*`単体は誤り。しかし`GoString`を定義して渡す形も同様にクラッシュした。
+- `SearchBegin(ubyte*, int)` → **序盤の短い種（84文字）では値を返したが、
+  中盤の現実的な種（370〜536文字）では再現性なくクラッシュ**。
+  さらに戻り値が呼び出しごとに `0x9284e0` と `0x7fa6e79c01b0` のように一貫せず、
+  正常な呼び出しではなく**未定義動作を踏んでいる**と判断した。
+
+⚠️ **提出物（`submission/main.py`）に推測シグネチャを入れてはいけない。**
+このコンペではクラッシュ・タイムアウトが即敗北であり、セグフォルトのリスクを
+本番エージェントに持ち込む価値はない。正しいシグネチャ（コンペ公式ドキュメントや
+フォーラムに記載がある可能性が高い——`search_begin_input`は明らかにエージェント向けの
+公開機能なので）が判明するまでは、探索の実装に進むべきではない。
+
+### 9.3 なぜこれが重要か
+
+現行エージェントは0手先読みの貪欲スコアリングで、カードテキストを正規表現で読む方式の
+限界に達している（デッキは8種の代替案を却下して局所最適、ヒューリスティックの微修正は
+1,800戦A/Bでも判別できない3ポイント未満の効果しかない——`STRATEGY_REPORT.md` 5.19節）。
+このAPIが使えれば「ヒューリスティックで手を評価する」から「実際に手を試して結果で選ぶ」
+への質的転換になり、残っている中で最もリターンの大きい方向性である。
