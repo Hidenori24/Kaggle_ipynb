@@ -121,6 +121,19 @@
    再利用する設計。自己対戦A/Bは3回の独立600戦で54.3%・49.0%・50.2%（プールして
    51.2%/1,800戦、3回中2回が50%超え）と、v3採用時と同水準の結果を確認して採用
    （詳細は[`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.18節参照）。
+   それでも実戦成績が伸びないため、次は個別の改善案ではなく**測定基盤そのもの**を
+   検証した。ハーネスに同一のエージェント（真の答えが必ず50%）を与える方法で、
+   (1) 交替ありの実ハーネスは偏っていない（50.33%/2,400戦・p=0.76）、
+   (2) ただし**このエンジンには実在する先手有利がある**（スロット0が52.28%/3,600戦・
+   p=0.0066）ので交替処理は不可欠、(3) 一方で判定基準に使っていた「43〜57%はノイズ」
+   という帯は**N≈100用の値**で、実際に使う600〜3,600戦では2〜8倍広すぎた——ことを
+   確認。厳密な二項検定で過去の判断を再評価すると、却下側は全て正しかったが、
+   採用側のうちコインフリップEV（p=0.125）と1手先読み（p=0.309）は有意性に
+   達しておらず、「真の効果1〜2ポイントの変更を、それを判別できない解像度で
+   採用と判定し続けていた」ことが判明した（これが「改善しても順位が動かない」
+   ことの直接的な説明になっている）。対処として
+   [`tools/ab_significance.py`](tools/ab_significance.py)を追加
+   （詳細は[`STRATEGY_REPORT.md`](STRATEGY_REPORT.md) 5.19節参照）。
 4. 実測の勝率・カードプールの分析結果を Jupyter Notebook にまとめた
    （捏造データなし、すべて実エンジンでの実行結果）。
 
@@ -146,6 +159,7 @@ pokemon-tcg-ai-battle/
 ├── tools/
 │   ├── evaluate.py             # 実エンジンでの自己対戦・勝率計測CLI
 │   ├── build_deck.py           # デッキ案のA/Bテスト（deck.csv の選定根拠を再現）
+│   ├── ab_significance.py      # A/B結果の有意性判定（Wilson区間＋厳密二項検定）
 │   ├── kaggle_submit.sh        # submission/ をzip化してKaggleに提出
 │   ├── kaggle_status.sh        # 提出履歴・リーダーボードを確認
 │   ├── build_kaggle_kernel.py  # main.pyを自己完結ノートブックに変換（Kaggle Notebook用）
@@ -153,7 +167,8 @@ pokemon-tcg-ai-battle/
 │   └── kaggle_kernel_status.sh # Kaggle Notebookの実行結果を確認・ダウンロード
 ├── tests/
 │   ├── test_policy.py      # 実エンジンでのクラッシュ・不正選択防止テスト（pytest）
-│   └── test_heuristics.py  # score_option()内の個別ロジック（bench_is_thin等）の単体テスト
+│   ├── test_heuristics.py  # score_option()内の個別ロジック（bench_is_thin等）の単体テスト
+│   └── test_ab_significance.py # A/B有意性判定ツールの単体テスト
 ├── notebooks/
 │   ├── 01_card_pool_eda.ipynb      # 実カードデータベースのEDA
 │   └── 02_agent_evaluation.ipynb   # デッキ比較・勝率検証（実行済み）
