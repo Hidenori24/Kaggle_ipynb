@@ -140,6 +140,17 @@ class ContainerState:
         iy1 = max(iy0 + 1, min(iy1, self.grid_n))
         return ix0, ix1, iy0, iy1
 
+    def _mark_occupied(self, x0: float, x1: float, y0: float, y1: float, top_z: float,
+                        is_soft: bool, is_prioritized: bool) -> None:
+        ix0, ix1, iy0, iy1 = self._grid_index_range(x0, x1, y0, y1)
+        sub = self.height_grid[ix0:ix1, iy0:iy1]
+        mask = top_z > sub
+        if not mask.any():
+            return
+        sub[mask] = top_z
+        self.top_soft[ix0:ix1, iy0:iy1][mask] = bool(is_soft)
+        self.top_prioritized[ix0:ix1, iy0:iy1][mask] = bool(is_prioritized)
+
     def _build_from_packed_items(self, packed_items: list[dict]) -> None:
         # Our grid is coarse (a few cm per cell) relative to the validator's
         # own safety_margin (1.5cm in the evaluation config): a gap that
@@ -154,15 +165,24 @@ class ContainerState:
             if pos is None or orn is None:
                 continue
             lo, hi = item_world_aabb(pos, orn, item["length"], item["width"], item["height"])
-            x0, x1 = self.local_x(lo[0]) - pad, self.local_x(hi[0]) + pad
-            y0, y1 = lo[1] - pad, hi[1] + pad
-            top_z = float(hi[2])
+            self._mark_occupied(
+                self.local_x(lo[0]) - pad, self.local_x(hi[0]) + pad,
+                lo[1] - pad, hi[1] + pad,
+                float(hi[2]), item.get("is_soft", False), item.get("is_prioritized", False),
+            )
 
-            ix0, ix1, iy0, iy1 = self._grid_index_range(x0, x1, y0, y1)
-            sub = self.height_grid[ix0:ix1, iy0:iy1]
-            mask = top_z > sub
-            if not mask.any():
-                continue
-            sub[mask] = top_z
-            self.top_soft[ix0:ix1, iy0:iy1][mask] = bool(item.get("is_soft", False))
-            self.top_prioritized[ix0:ix1, iy0:iy1][mask] = bool(item.get("is_prioritized", False))
+    def place_virtual(self, x_center: float, y_center: float, dl: float, dw: float, top_z: float,
+                       is_soft: bool, is_prioritized: bool) -> None:
+        """Record a placement decision that hasn't actually happened in the
+        simulator (no physics settling to read back) -- used by the offline
+        planner's dry-run pack, where we choose our own coordinates for
+        every item up front instead of reading them from `packed_items`.
+        Uses the same conservative padding as real placements so the dry
+        run doesn't plan into gaps tighter than a real one would allow.
+        """
+        pad = 0.03
+        self._mark_occupied(
+            x_center - dl / 2.0 - pad, x_center + dl / 2.0 + pad,
+            y_center - dw / 2.0 - pad, y_center + dw / 2.0 + pad,
+            top_z, is_soft, is_prioritized,
+        )
