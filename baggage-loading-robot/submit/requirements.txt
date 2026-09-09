@@ -1,0 +1,2 @@
+# No extra dependencies beyond what the evaluation image already provides
+# (numpy ships as a transitive dependency of gymnasium/pybullet/torch).
