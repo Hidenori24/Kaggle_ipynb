@@ -23,20 +23,21 @@ CORNER_KEEPOUT_PENALTY = 60.0
 FOOTPRINT_BONUS_SCALE = 0.001
 
 
-def choose_placement(states: list[ContainerState], candidates: list[dict], deadline: float | None = None):
-    """Search every (candidate, orientation, container) combination.
+def rank_placements(states: list[ContainerState], candidates: list[dict], deadline: float | None = None):
+    """Search every (candidate, orientation, container) combination and
+    return each candidate item's own best placement, sorted best-first.
 
     `candidates` should already be ordered largest-first: under a time
     budget we bail out between candidates, so that ordering determines which
     items got a fair evaluation.
 
-    Returns (score, candidate_idx, container_idx, orn_idx, result, (dl, dw, dh))
-    for the best combination found, or None if nothing fits anywhere.
+    Each entry is (score, candidate_idx, container_idx, orn_idx, result,
+    (dl, dw, dh)). Returns [] if nothing fits anywhere for anyone.
     """
     has_priority_container = any(s.is_prioritized for s in states)
     multi_container = len(states) > 1
 
-    best = None
+    per_candidate_best: dict[int, tuple] = {}
     for candidate_idx, item in enumerate(candidates):
         length, width, height = item["length"], item["width"], item["height"]
         is_soft = bool(item.get("is_soft", False))
@@ -76,13 +77,22 @@ def choose_placement(states: list[ContainerState], candidates: list[dict], deadl
                     score += CORNER_KEEPOUT_PENALTY
                 score -= FOOTPRINT_BONUS_SCALE * (dl * dw)
 
-                if best is None or score < best[0]:
-                    best = (score, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh))
+                entry = (score, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh))
+                current = per_candidate_best.get(candidate_idx)
+                if current is None or score < current[0]:
+                    per_candidate_best[candidate_idx] = entry
 
         if deadline is not None and time.perf_counter() > deadline:
             break
 
-    return best
+    return sorted(per_candidate_best.values(), key=lambda entry: entry[0])
+
+
+def choose_placement(states: list[ContainerState], candidates: list[dict], deadline: float | None = None):
+    """The single best (candidate, orientation, container, position)
+    combination, or None if nothing fits anywhere. See rank_placements."""
+    ranked = rank_placements(states, candidates, deadline)
+    return ranked[0] if ranked else None
 
 
 def largest_first_order(items: list[dict]) -> list[int]:

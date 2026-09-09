@@ -11,6 +11,7 @@ containers), which only ever makes us slightly more conservative.
 """
 from __future__ import annotations
 
+import copy
 import math
 
 import numpy as np
@@ -88,6 +89,19 @@ class ContainerState:
     def _y_index(self, y: float) -> int:
         idx = int(math.floor((y - self.y_min) / self.cell_h))
         return max(0, min(idx, self.grid_n))
+
+    def clone(self) -> "ContainerState":
+        """A copy safe to mutate independently -- used for what-if branches
+        (the online policy's shallow lookahead) that shouldn't affect the
+        state used for the actually-chosen move. `ceiling_grid` and
+        `corner_keepout` are set once in __init__ and never mutated again,
+        so it's safe to share those arrays rather than copy them.
+        """
+        new = copy.copy(self)
+        new.height_grid = self.height_grid.copy()
+        new.top_soft = self.top_soft.copy()
+        new.top_prioritized = self.top_prioritized.copy()
+        return new
 
     def local_x(self, world_x: float) -> float:
         return world_x - self.offset_x
