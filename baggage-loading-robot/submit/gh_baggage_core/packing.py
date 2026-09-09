@@ -29,6 +29,75 @@ def _windows(arr: np.ndarray, fw: int, fh: int) -> np.ndarray:
     return out
 
 
+def _sliding_max_axis0(arr: np.ndarray, fw: int) -> np.ndarray:
+    """max over every length-fw window along axis 0, keeping axis 1 intact."""
+    if sliding_window_view is not None:
+        return sliding_window_view(arr, fw, axis=0).max(axis=-1)
+    n0 = arr.shape[0] - fw + 1
+    out = np.empty((n0, arr.shape[1]), dtype=arr.dtype)
+    for i in range(n0):
+        out[i] = arr[i:i + fw].max(axis=0)
+    return out
+
+
+# Items enter through the door (local y_min side) and slide straight in
+# along +Y at roughly a constant X/Z until they reach their resting spot
+# (see the simulator's PlacementValidator.check_transport_path -- the X
+# correction afterwards is only a few millimeters). So any already-placed
+# item sitting in the same X-columns, between the door and our candidate
+# spot, and taller than our own landing height, would be hit during entry.
+#
+# Gliding along a surface that is level with (or lower than) our own
+# landing height is completely normal -- most items rest flush on the bare
+# floor, which is "in the way" of every deeper cell in exactly this sense,
+# without being an obstruction at all. So the corridor only counts as
+# blocked when something in it is genuinely *taller* than where we're
+# landing; this small epsilon exists purely for floating point safety, not
+# as a required physical standoff (that's already provided by the AABB
+# padding in ContainerState._build_from_packed_items).
+PATH_CLEARANCE = 0.005
+
+# `flat` is the height difference between the highest and lowest cell in the
+# footprint -- a large value means the item would only really touch down on
+# a small sliver (e.g. the corner of a shorter neighbor) while the rest of
+# its base hangs unsupported in the air. In practice that reliably tips the
+# item over during the physics settle step, which -- exactly like a blocked
+# entry path -- ends the whole episode (place_item failing marks the step
+# terminated). So "reasonably flat support" is treated as a near-hard
+# requirement, on the same footing as a clear entry path.
+FLAT_TOLERANCE = 0.03
+
+# Large, roughly-equal penalties for the three ways a candidate can plausibly
+# get this whole episode terminated (blocked entry path, unsupported/tipping
+# perch, forced sideways detour through the chamfered corner). The base score
+# below is `top * 1000` (top is in meters, rarely above ~2), so this must be
+# well past that scale to reliably dominate any plausible top/flat
+# difference -- otherwise a low-but-blocked spot can out-score a slightly
+# higher, genuinely clear one, which defeats the whole point of tracking
+# these risks. Unlike a hard filter, it still returns *something* even when
+# every option on the grid carries some risk.
+RISK_PENALTY = 5000.0
+
+# Previously-placed items rarely settle perfectly flat (tiny tilts from the
+# physics settle step are normal), so a target that assumes their recorded
+# top height exactly is occasionally a millimeter or two optimistic. A small
+# vertical buffer on every landing (not just the floor, which already gets
+# one via ContainerState.floor_z) keeps that from turning into a graze.
+LANDING_CLEARANCE = 0.025
+
+
+def _path_block_height(state: ContainerState, fw: int, n_iy: int) -> np.ndarray:
+    """For every (ix, iy) anchor, the tallest obstruction in the entry
+    corridor (same X-columns, door side up to iy-1) that a new item would
+    have to clear. -inf where iy == 0 (nothing between the door and here)."""
+    cummax_y = np.maximum.accumulate(state.height_grid, axis=1)
+    block_by_col = _sliding_max_axis0(cummax_y, fw)  # shape (n-fw+1, n)
+    path_block = np.full((block_by_col.shape[0], n_iy), -np.inf)
+    if n_iy > 1:
+        path_block[:, 1:n_iy] = block_by_col[:, 0:n_iy - 1]
+    return path_block
+
+
 def best_position(state: ContainerState, footprint_x: float, footprint_y: float, item_height: float,
                    avoid_soft_top: bool, avoid_priority_top: bool) -> dict | None:
     """Search the grid for the best anchor to place a `footprint_x x footprint_y`
@@ -44,10 +113,14 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     top = top_windows.max(axis=(2, 3))
     bottom = top_windows.min(axis=(2, 3))
     flat = top - bottom
+    landing_bottom = top + LANDING_CLEARANCE
 
-    fits_ceiling = (top + item_height) <= (state.ceiling_z + 1e-6)
+    fits_ceiling = (landing_bottom + item_height) <= (state.ceiling_z + 1e-6)
     if not fits_ceiling.any():
         return None
+
+    path_block = _path_block_height(state, fw, top.shape[1])
+    path_clear = path_block <= (landing_bottom + PATH_CLEARANCE)
 
     conflict = np.zeros_like(fits_ceiling, dtype=bool)
     if avoid_soft_top:
@@ -55,26 +128,32 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     if avoid_priority_top:
         conflict |= _windows(state.top_prioritized, fw, fh).any(axis=(2, 3))
 
-    valid = fits_ceiling & ~conflict
-    used_conflict_relax = False
-    if not valid.any():
-        valid = fits_ceiling
-        used_conflict_relax = True
-        if not valid.any():
-            return None
+    stable = flat <= FLAT_TOLERANCE
+    in_corner_keepout = _windows(state.corner_keepout, fw, fh).any(axis=(2, 3))
 
-    # Primary: minimize resulting stack height (keeps the load low / stable
-    # and leaves headroom for later items). Secondary: prefer a flat support
-    # surface (reduces tip-over risk on settle). Tertiary: mild bottom-left
-    # bias for a tidy, deterministic layout.
+    # `fits_ceiling` is a genuine hard constraint (there is no way to make an
+    # over-height placement valid). Everything else is a strong-but-soft
+    # penalty: we always want *a* candidate back, even if every option on
+    # the grid carries some risk, since returning None drops the item from
+    # consideration entirely.
+    # Tie-break prefers larger iy (deeper, further from the door) over
+    # smaller: filling from the back of the container forward keeps the
+    # door-side lane clear for longer, so later, deeper-targeted items don't
+    # find themselves boxed in with no unobstructed entry path (the failure
+    # mode `path_clear`/RISK_PENALTY above exists to penalize, but can't
+    # always avoid once earlier placements have already used up every lane).
     ix_grid, iy_grid = np.meshgrid(np.arange(top.shape[0]), np.arange(top.shape[1]), indexing="ij")
-    score = top * 1000.0 + flat * 10.0 + (ix_grid + iy_grid) * 1e-4
-    score = np.where(valid, score, np.inf)
+    score = top * 1000.0 + flat * 10.0 + (ix_grid - iy_grid) * 1e-4
+    score = score + (~path_clear) * RISK_PENALTY
+    score = score + (~stable) * RISK_PENALTY
+    score = score + in_corner_keepout * RISK_PENALTY
+    score = score + conflict * 0.5
+    score = np.where(fits_ceiling, score, np.inf)
     ix, iy = np.unravel_index(np.argmin(score), score.shape)
 
     x_center = state.x_min + (ix + fw / 2.0) * state.cell_w
     y_center = state.y_min + (iy + fh / 2.0) * state.cell_h
-    z_center = float(top[ix, iy]) + item_height / 2.0
+    z_center = float(landing_bottom[ix, iy]) + item_height / 2.0
 
     return {
         "x": x_center,
@@ -82,7 +161,10 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
         "z": z_center,
         "top": float(top[ix, iy]),
         "flat": float(flat[ix, iy]),
-        "conflict": bool(conflict[ix, iy]) or used_conflict_relax,
+        "conflict": bool(conflict[ix, iy]),
+        "path_blocked": not bool(path_clear[ix, iy]),
+        "unstable": not bool(stable[ix, iy]),
+        "in_corner_keepout": bool(in_corner_keepout[ix, iy]),
         "fw": fw,
         "fh": fh,
     }

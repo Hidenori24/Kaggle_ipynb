@@ -20,6 +20,8 @@ the lowest overall cost. Costs combine:
 """
 from __future__ import annotations
 
+import time
+
 import numpy as np
 
 from .container_state import ContainerState
@@ -29,7 +31,19 @@ from .packing import best_position
 PRIORITY_CONTAINER_VIOLATION_PENALTY = 1000.0
 PRIORITY_CONTAINER_RESERVE_PENALTY = 0.05
 TOP_CONFLICT_PENALTY = 0.5
+PATH_BLOCKED_PENALTY = 100.0
+UNSTABLE_PENALTY = 100.0
+CORNER_KEEPOUT_PENALTY = 60.0
 FOOTPRINT_BONUS_SCALE = 0.001
+
+# The evaluation harness enforces an 8-10s wall-clock budget per policy()
+# call and, on timeout, substitutes a *random* action of its own -- which is
+# far more likely to fail the transport-path/settle checks and end the whole
+# episode early than a merely-suboptimal choice of ours would be. We budget
+# well under that limit so slower/loaded evaluation hardware can never push
+# us over it, and degrade gracefully (return the best candidate found so
+# far) rather than risk the harness's own fallback.
+TIME_BUDGET_SECONDS = 4.0
 
 
 class Policy:
@@ -43,6 +57,7 @@ class Policy:
             return self._fallback_action(observation)
 
     def _act(self, observation: dict) -> dict:
+        deadline = time.perf_counter() + TIME_BUDGET_SECONDS
         container_list = observation.get("container_list") or []
         pool_list = observation.get("pool_list") or []
 
@@ -53,9 +68,18 @@ class Policy:
         has_priority_container = any(s.is_prioritized for s in states)
         multi_container = len(states) > 1
 
+        # Evaluate the biggest items first: a good decision matters most for
+        # them, so if the time budget forces an early cutoff we still end up
+        # having considered the placements that matter most.
+        item_order = sorted(
+            range(len(pool_list)),
+            key=lambda i: -(pool_list[i]["length"] * pool_list[i]["width"] * pool_list[i]["height"]),
+        )
+
         best = None  # (score, item_pos_idx, container_pos_idx, orn_idx, pos_result, dims)
 
-        for item_pos_idx, item in enumerate(pool_list):
+        for item_pos_idx in item_order:
+            item = pool_list[item_pos_idx]
             length, width, height = item["length"], item["width"], item["height"]
             is_soft = bool(item.get("is_soft", False))
             is_prioritized = bool(item.get("is_prioritized", False))
@@ -86,10 +110,19 @@ class Policy:
                     score = result["top"] + container_penalty
                     if result["conflict"]:
                         score += TOP_CONFLICT_PENALTY
+                    if result["path_blocked"]:
+                        score += PATH_BLOCKED_PENALTY
+                    if result["unstable"]:
+                        score += UNSTABLE_PENALTY
+                    if result["in_corner_keepout"]:
+                        score += CORNER_KEEPOUT_PENALTY
                     score -= FOOTPRINT_BONUS_SCALE * (dl * dw)
 
                     if best is None or score < best[0]:
                         best = (score, item_pos_idx, c_idx, orn_idx, result, (dl, dw, dh))
+
+            if time.perf_counter() > deadline:
+                break
 
         if best is None:
             return self._fallback_action(observation)
@@ -113,13 +146,14 @@ class Policy:
         if container_list:
             c = container_list[0]
             thickness = float(c.get("thickness", 0.02))
-            length = float(c.get("length", 1.0))
-            width = float(c.get("width", 1.0))
             item_h = 0.2
             if pool_list:
                 item_h = float(pool_list[0].get("height", 0.2))
-            x = -length / 2.0 + thickness + 0.1
-            y = -width / 2.0 + thickness + 0.1
+            # Dead center of the floor: farthest from either x-extreme, so it
+            # stays clear of the chamfered corner regardless of which side
+            # it's actually on (see ContainerState._apply_cut_corner_keepout).
+            x = 0.0
+            y = 0.0
             z = thickness + item_h / 2.0
             place_pos = np.array([x, y, z], dtype=np.float32)
         else:

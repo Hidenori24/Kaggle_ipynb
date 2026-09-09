@@ -22,10 +22,15 @@ def test_empty_container_floor_is_flat():
     assert (interior == state.floor_z).all()
 
 
-def test_cut_corner_keepout_raises_both_x_extremes():
+def test_cut_corner_keepout_raises_x_min_side_only():
+    # The simulator always anchors the LD3 chamfer at local x_min (see
+    # write_open_cut_corner_cup_obj / Container._create_small_shelf, both of
+    # which build the cut at -length/2) -- never at x_max.
     state = ContainerState(dict(BASE_CONTAINER), grid_n=16)
     assert (state.height_grid[0, :] > state.floor_z).all()
-    assert (state.height_grid[-1, :] > state.floor_z).all()
+    assert (state.corner_keepout[0, :]).all()
+    assert (state.height_grid[-1, :] == state.floor_z).all()
+    assert not state.corner_keepout[-1, :].any()
 
 
 def test_packed_item_raises_heightmap_and_tags_top():
