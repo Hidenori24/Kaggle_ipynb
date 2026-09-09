@@ -49,26 +49,45 @@ class ContainerState:
         self.floor_z = self.thickness + SAFETY_MARGIN
 
         top_margin = 0.02
-        if self.has_shelf:
-            # Conservative simplification: treat the internal shelf plane as
-            # a hard ceiling rather than reconstructing the exact partitioned
-            # sub-volumes above/behind it. Trades a little capacity for
-            # guaranteed collision safety.
-            self.ceiling_z = self.height / 2.0 + self.thickness / 2.0 - top_margin
-        else:
-            self.ceiling_z = self.height - self.thickness - top_margin
+        self.ceiling_z = self.height - self.thickness - top_margin
         self.ceiling_z = max(self.ceiling_z, self.floor_z + 0.05)
 
         self.grid_n = grid_n
         self.cell_w = (self.x_max - self.x_min) / grid_n
         self.cell_h = (self.y_max - self.y_min) / grid_n
         self.height_grid = np.full((grid_n, grid_n), self.floor_z, dtype=np.float64)
+        self.ceiling_grid = np.full((grid_n, grid_n), self.ceiling_z, dtype=np.float64)
         self.top_soft = np.zeros((grid_n, grid_n), dtype=bool)
         self.top_prioritized = np.zeros((grid_n, grid_n), dtype=bool)
         self.corner_keepout = np.zeros((grid_n, grid_n), dtype=bool)
 
+        if self.has_shelf:
+            self._apply_shelf_ceiling()
         self._apply_cut_corner_keepout()
         self._build_from_packed_items(container.get("packed_items", []) or [])
+
+    def _apply_shelf_ceiling(self) -> None:
+        """Conservative simplification: treat the internal shelf plane as a
+        hard ceiling rather than reconstructing the exact partitioned
+        sub-volumes above/behind it. The shelf plank spans roughly
+        [height/2 + buffer, height/2 + thickness + buffer] in Z (see
+        Container._create_shelf in the simulator source) and only the local
+        y >= ~0 half of the depth (it's built at y-center = width/4 with a
+        half-extent of width/4 - thickness, i.e. y in
+        [thickness, width/2 - thickness]) -- so capping the *entire*
+        container at half-height would sacrifice an entire usable half for a
+        thin plank that only occupies part of it. `buffer` isn't part of the
+        observation we receive, so we stay well clear of height/2 rather
+        than of the plank's exact underside, and treat local y < 0 (the
+        whole door-side half) as shelf-free.
+        """
+        shelf_ceiling = max(self.height / 2.0 - 0.05, self.floor_z + 0.05)
+        iy0 = self._y_index(0.0)
+        self.ceiling_grid[:, iy0:] = np.minimum(self.ceiling_grid[:, iy0:], shelf_ceiling)
+
+    def _y_index(self, y: float) -> int:
+        idx = int(math.floor((y - self.y_min) / self.cell_h))
+        return max(0, min(idx, self.grid_n))
 
     def local_x(self, world_x: float) -> float:
         return world_x - self.offset_x
@@ -92,13 +111,22 @@ class ContainerState:
         clear. We mark this band `corner_keepout` so the search can strongly
         prefer landing spots outside of it, without banning it outright (it
         is still real, usable volume once nothing else is available).
+
+        The same band also always hosts a physical "small shelf" ledge
+        around mid-height (`Container._create_small_shelf` runs whether or
+        not `require_shelf` is set), which we don't otherwise model at all.
+        Rather than track its thin, hard-to-pin-down real position exactly,
+        we treat the whole band as fully unusable (not just discouraged, as
+        `in_corner_keepout` scoring alone would give it) -- it's a narrow
+        strip that's already avoided almost everywhere else, so sacrificing
+        its low chamfer pocket too costs little fill capacity in exchange
+        for closing off a collision we otherwise have no way to see coming.
         """
         if self.cut_x <= 0 or self.cut_y <= 0:
             return
         band_cells = max(1, int(math.ceil(self.cut_x / max(self.cell_w, 1e-6))))
         band_cells = min(band_cells, self.grid_n - 1)
-        cut_top = self.floor_z + self.cut_y
-        self.height_grid[:band_cells, :] = np.maximum(self.height_grid[:band_cells, :], cut_top)
+        self.height_grid[:band_cells, :] = self.ceiling_z
         self.corner_keepout[:band_cells, :] = True
 
     def _grid_index_range(self, x0: float, x1: float, y0: float, y1: float):

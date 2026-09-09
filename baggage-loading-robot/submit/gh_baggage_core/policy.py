@@ -141,21 +141,22 @@ class Policy:
 
     @staticmethod
     def _fallback_action(observation: dict) -> dict:
+        # Only reached when best_position found nowhere valid for *any*
+        # pool item/orientation (an effectively full container) or the main
+        # search raised, so there's no guarantee this specific spot is
+        # collision-free either -- but it must at least satisfy the
+        # inclusion check on its own, which a bare `thickness` floor height
+        # does not (see ContainerState.floor_z's SAFETY_MARGIN).
         container_list = observation.get("container_list") or []
         pool_list = observation.get("pool_list") or []
         if container_list:
-            c = container_list[0]
-            thickness = float(c.get("thickness", 0.02))
-            item_h = 0.2
-            if pool_list:
-                item_h = float(pool_list[0].get("height", 0.2))
-            # Dead center of the floor: farthest from either x-extreme, so it
-            # stays clear of the chamfered corner regardless of which side
-            # it's actually on (see ContainerState._apply_cut_corner_keepout).
-            x = 0.0
-            y = 0.0
-            z = thickness + item_h / 2.0
-            place_pos = np.array([x, y, z], dtype=np.float32)
+            try:
+                state = ContainerState(container_list[0])
+                item_h = float(pool_list[0]["height"]) if pool_list else 0.2
+                z = min(state.floor_z + item_h / 2.0, state.ceiling_z - item_h / 2.0)
+                place_pos = np.array([0.0, 0.0, z], dtype=np.float32)
+            except Exception:
+                place_pos = np.array([0.0, 0.0, 0.5], dtype=np.float32)
         else:
             place_pos = np.array([0.0, 0.0, 0.5], dtype=np.float32)
         return {

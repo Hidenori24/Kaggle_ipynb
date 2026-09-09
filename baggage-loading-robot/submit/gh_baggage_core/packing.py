@@ -78,6 +78,13 @@ FLAT_TOLERANCE = 0.03
 # every option on the grid carries some risk.
 RISK_PENALTY = 5000.0
 
+# How strongly a deeper (further-from-the-door) landing spot is preferred
+# over a shallower one at the same height, on the same top*1000 scale. Large
+# enough to reroute around a modest stack (comparable to ~15cm of extra
+# height) rather than immediately reverting to "closest to the door wins"
+# the moment anything is already placed.
+DEEP_BIAS_WEIGHT = 150.0
+
 # Previously-placed items rarely settle perfectly flat (tiny tilts from the
 # physics settle step are normal), so a target that assumes their recorded
 # top height exactly is occasionally a millimeter or two optimistic. A small
@@ -115,7 +122,11 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     flat = top - bottom
     landing_bottom = top + LANDING_CLEARANCE
 
-    fits_ceiling = (landing_bottom + item_height) <= (state.ceiling_z + 1e-6)
+    # The applicable ceiling can vary across the footprint (e.g. a shelf
+    # covering only part of the container), so use whatever is most
+    # restrictive within the window.
+    window_ceiling = _windows(state.ceiling_grid, fw, fh).min(axis=(2, 3))
+    fits_ceiling = (landing_bottom + item_height) <= (window_ceiling + 1e-6)
     if not fits_ceiling.any():
         return None
 
@@ -136,14 +147,21 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     # penalty: we always want *a* candidate back, even if every option on
     # the grid carries some risk, since returning None drops the item from
     # consideration entirely.
-    # Tie-break prefers larger iy (deeper, further from the door) over
-    # smaller: filling from the back of the container forward keeps the
-    # door-side lane clear for longer, so later, deeper-targeted items don't
-    # find themselves boxed in with no unobstructed entry path (the failure
-    # mode `path_clear`/RISK_PENALTY above exists to penalize, but can't
-    # always avoid once earlier placements have already used up every lane).
+    #
+    # Deep-first bias: prefer larger iy (further from the door) over
+    # smaller, at a weight big enough to actually compete with `top` (unlike
+    # a mere tie-break). A single item colliding ends the whole episode and
+    # torches every remaining item's contribution to the score, so it is
+    # worth deliberately accepting a noticeably higher landing spot to keep
+    # the door-side lane clear for later, deeper-targeted items -- this is
+    # what makes fill-from-the-back-forward hold up beyond an empty
+    # container, where `top` differences are still small enough for it to
+    # matter, instead of collapsing back into fill-from-the-door the moment
+    # any stacking is involved.
+    n_iy = max(top.shape[1] - 1, 1)
     ix_grid, iy_grid = np.meshgrid(np.arange(top.shape[0]), np.arange(top.shape[1]), indexing="ij")
-    score = top * 1000.0 + flat * 10.0 + (ix_grid - iy_grid) * 1e-4
+    deep_bias = -(iy_grid / n_iy) * DEEP_BIAS_WEIGHT
+    score = top * 1000.0 + flat * 10.0 + deep_bias + ix_grid * 1e-4
     score = score + (~path_clear) * RISK_PENALTY
     score = score + (~stable) * RISK_PENALTY
     score = score + in_corner_keepout * RISK_PENALTY

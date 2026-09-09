@@ -52,9 +52,18 @@ def test_packed_item_raises_heightmap_and_tags_top():
     assert not state.top_prioritized[center_ix, center_iy]
 
 
-def test_shelf_container_has_lower_ceiling():
+def test_shelf_container_lowers_ceiling_on_the_back_half_only():
+    # The shelf plank only occupies the back half of the depth (local y >= 0,
+    # see Container._create_shelf); the door-side half keeps full height so
+    # a shelf-equipped container isn't treated as having half the capacity
+    # of an otherwise-identical one.
     with_shelf = dict(BASE_CONTAINER, shelf=True)
     without_shelf = dict(BASE_CONTAINER, shelf=False)
     s1 = ContainerState(with_shelf, grid_n=8)
     s2 = ContainerState(without_shelf, grid_n=8)
-    assert s1.ceiling_z < s2.ceiling_z
+    assert s1.ceiling_z == s2.ceiling_z
+    back_half = s1.ceiling_grid[:, s1.grid_n // 2:]
+    front_half = s1.ceiling_grid[:, :s1.grid_n // 2]
+    assert (back_half < s1.ceiling_z).all()
+    assert (front_half == s1.ceiling_z).all()
+    assert (s2.ceiling_grid == s2.ceiling_z).all()
