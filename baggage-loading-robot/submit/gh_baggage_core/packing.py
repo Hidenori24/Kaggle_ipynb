@@ -158,10 +158,17 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     # container, where `top` differences are still small enough for it to
     # matter, instead of collapsing back into fill-from-the-door the moment
     # any stacking is involved.
+    # `flat` is weighted close to `top`'s own scale (not the ~10x-weaker
+    # tie-break it used to be): once every candidate is at least somewhat
+    # risky -- which RISK_PENALTY alone can't prevent, it's a flat additive
+    # offset that cancels out between two already-unstable options -- this
+    # is what actually decides "least bad" in favor of the smallest
+    # unsupported gap (most likely to survive settling) rather than just the
+    # lowest height.
     n_iy = max(top.shape[1] - 1, 1)
     ix_grid, iy_grid = np.meshgrid(np.arange(top.shape[0]), np.arange(top.shape[1]), indexing="ij")
     deep_bias = -(iy_grid / n_iy) * DEEP_BIAS_WEIGHT
-    score = top * 1000.0 + flat * 10.0 + deep_bias + ix_grid * 1e-4
+    score = top * 1000.0 + flat * 500.0 + deep_bias + ix_grid * 1e-4
     score = score + (~path_clear) * RISK_PENALTY
     score = score + (~stable) * RISK_PENALTY
     score = score + in_corner_keepout * RISK_PENALTY
