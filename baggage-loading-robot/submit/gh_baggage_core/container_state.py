@@ -62,6 +62,17 @@ class ContainerState:
         self.top_prioritized = np.zeros((grid_n, grid_n), dtype=bool)
         self.corner_keepout = np.zeros((grid_n, grid_n), dtype=bool)
 
+        # Exact (unpadded) 3D AABBs of every item accounted for so far, in
+        # local (x, y, z) coordinates -- kept alongside the heightmap so
+        # `packing.best_position` can run a real box-vs-box clearance check
+        # against the validator's own safety_margin on its final candidate,
+        # as a defense-in-depth check on top of the heightmap/padding
+        # approximation (which collapses the true 3D shape of every item
+        # into a single per-column max height, and can only represent that
+        # approximation at this grid's own resolution). List of
+        # (lo, hi) tuples, each a 3-tuple of floats.
+        self.item_aabbs: list[tuple[tuple[float, float, float], tuple[float, float, float]]] = []
+
         # The container's exact geometric half-space representation (same
         # data the validator's own `check_inclusion` uses): a list of plane
         # normals (`n_vecs`) and a point on each plane (`points`). We only
@@ -134,6 +145,7 @@ class ContainerState:
         new.height_grid = self.height_grid.copy()
         new.top_soft = self.top_soft.copy()
         new.top_prioritized = self.top_prioritized.copy()
+        new.item_aabbs = list(self.item_aabbs)
         return new
 
     def local_x(self, world_x: float) -> float:
@@ -214,22 +226,36 @@ class ContainerState:
             if pos is None or orn is None:
                 continue
             lo, hi = item_world_aabb(pos, orn, item["length"], item["width"], item["height"])
+            local_lo = (self.local_x(lo[0]), float(lo[1]), float(lo[2]))
+            local_hi = (self.local_x(hi[0]), float(hi[1]), float(hi[2]))
+            self.item_aabbs.append((local_lo, local_hi))
             self._mark_occupied(
-                self.local_x(lo[0]) - pad, self.local_x(hi[0]) + pad,
-                lo[1] - pad, hi[1] + pad,
-                float(hi[2]), item.get("is_soft", False), item.get("is_prioritized", False),
+                local_lo[0] - pad, local_hi[0] + pad,
+                local_lo[1] - pad, local_hi[1] + pad,
+                local_hi[2], item.get("is_soft", False), item.get("is_prioritized", False),
             )
 
     def place_virtual(self, x_center: float, y_center: float, dl: float, dw: float, top_z: float,
-                       is_soft: bool, is_prioritized: bool) -> None:
+                       is_soft: bool, is_prioritized: bool, dh: float | None = None) -> None:
         """Record a placement decision that hasn't actually happened in the
         simulator (no physics settling to read back) -- used by the offline
         planner's dry-run pack, where we choose our own coordinates for
         every item up front instead of reading them from `packed_items`.
         Uses the same conservative padding as real placements so the dry
         run doesn't plan into gaps tighter than a real one would allow.
+
+        `dh` (the item's own height in this orientation) is optional only
+        for backward compatibility -- pass it whenever known so this
+        placement is also available to the exact-AABB check in packing.py
+        (see `item_aabbs`); without it, this virtual placement only affects
+        the heightmap, same as before that check existed.
         """
         pad = 0.03
+        if dh is not None:
+            self.item_aabbs.append((
+                (x_center - dl / 2.0, y_center - dw / 2.0, top_z - dh),
+                (x_center + dl / 2.0, y_center + dw / 2.0, top_z),
+            ))
         self._mark_occupied(
             x_center - dl / 2.0 - pad, x_center + dl / 2.0 + pad,
             y_center - dw / 2.0 - pad, y_center + dw / 2.0 + pad,

@@ -155,6 +155,7 @@ def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ra
             result["x"], result["y"], dl, dw, top_z,
             is_soft=bool(placed_item.get("is_soft", False)),
             is_prioritized=bool(placed_item.get("is_prioritized", False)),
+            dh=dh,
         )
         remaining = [c for i, c in enumerate(candidates) if i != candidate_idx]
 
@@ -175,6 +176,7 @@ def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ra
                 sub_result["x"], sub_result["y"], sdl, sdw, sub_top_z,
                 is_soft=bool(sub_item.get("is_soft", False)),
                 is_prioritized=bool(sub_item.get("is_prioritized", False)),
+                dh=sdh,
             )
             depth += 1
 

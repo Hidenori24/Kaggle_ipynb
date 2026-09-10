@@ -118,6 +118,46 @@ def test_stability_check_accepts_a_small_step_that_still_covers_the_center():
     assert not result["unstable"]
 
 
+def test_best_position_rejects_a_candidate_too_close_to_a_real_item_the_heightmap_missed():
+    # A phantom real item placed directly into item_aabbs (bypassing
+    # _mark_occupied/height_grid entirely) simulates a case the coarse
+    # heightmap+padding approximation let slip through -- the exact check
+    # is the only thing standing between this and an unsafe candidate.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    # Without any occupancy, the door-clearing deep-bias plus the ix
+    # tie-break make the leftmost (smallest ix), deepest (largest iy)
+    # anchor the natural pick -- put the phantom exactly there.
+    corner_x = state.x_min + 0.1
+    corner_y = state.y_max - 0.1
+    state.item_aabbs.append((
+        (corner_x - 0.1, corner_y - 0.1, state.floor_z),
+        (corner_x + 0.1, corner_y + 0.1, state.floor_z + 0.2),
+    ))
+
+    result = best_position(state, footprint_x=0.2, footprint_y=0.2, item_height=0.2,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    # Must not land within the phantom item's real (margin-padded) box.
+    too_close_x = corner_x - 0.115 <= result["x"] <= corner_x + 0.115
+    too_close_y = corner_y - 0.115 <= result["y"] <= corner_y + 0.115
+    assert not (too_close_x and too_close_y)
+
+
+def test_best_position_returns_none_when_the_only_candidates_are_all_too_close():
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=6)
+    # A phantom item spanning the whole floor footprint and the whole
+    # height range: no window the (tiny) grid can offer separates from it
+    # on any axis, regardless of what height the (untouched) height_grid
+    # reports.
+    state.item_aabbs.append((
+        (state.x_min - 1.0, state.y_min - 1.0, -10.0),
+        (state.x_max + 1.0, state.y_max + 1.0, 10.0),
+    ))
+    result = best_position(state, footprint_x=0.2, footprint_y=0.2, item_height=0.2,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is None
+
+
 def test_exact_chamfer_check_still_blocks_the_true_wedge_corner():
     from gh_baggage_core.packing import _chamfer_fits
 

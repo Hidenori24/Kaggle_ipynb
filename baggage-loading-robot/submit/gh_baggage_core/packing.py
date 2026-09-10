@@ -137,6 +137,21 @@ LANDING_CLEARANCE = 0.025
 CHAMFER_INCLUSION_MARGIN = -0.005
 CHAMFER_SAFETY_MARGIN = 0.012
 
+# Defense-in-depth on top of the heightmap/padding model above: that model
+# collapses every item's true 3D shape into a single per-column max height
+# at this grid's own (coarse) resolution, which can occasionally let a
+# candidate through that's actually closer to a real item than the
+# validator's own safety_margin allows (a gap that looks clear at grid
+# resolution can still be a real-world graze). `_exact_aabb_clear` checks
+# the chosen candidate's real (unpadded) box against every already-placed
+# item's real (unpadded) box directly, using this same real-world margin,
+# and rejects/retries if it's actually too close. This can only ever make a
+# candidate *more* conservative, never less, so it can't invalidate any of
+# the heightmap-based scoring -- it's a last-resort correction, not a
+# replacement for it.
+EXACT_CHECK_SAFETY_MARGIN = 0.015
+EXACT_CHECK_MAX_RETRIES = 20
+
 
 def _path_block_height(state: ContainerState, fw: int, n_iy: int) -> np.ndarray:
     """For every (ix, iy) anchor, the tallest obstruction in the entry
@@ -192,6 +207,29 @@ def _shadowed_clear_floor(state: ContainerState, fw: int, fh: int, n0: int, n1: 
     # Sum over the fw columns this footprint actually occupies.
     col_cumsum = np.concatenate([np.zeros((1, n1)), np.cumsum(behind_by_col, axis=0)], axis=0)
     return col_cumsum[fw:fw + n0] - col_cumsum[0:n0]  # shape (n0, n1)
+
+
+def _exact_aabb_clear(state: ContainerState, x_center: float, y_center: float,
+                       footprint_x: float, footprint_y: float, z0: float, z1: float) -> bool:
+    """True iff the box [x_center +/- footprint_x/2, y_center +/- footprint_y/2,
+    z0..z1] keeps at least EXACT_CHECK_SAFETY_MARGIN clear of every already
+    -placed item's real (unpadded) box in `state.item_aabbs`, using a
+    standard separating-axis test (axis-aligned boxes: a clear gap along
+    any single axis is a sound, if not tight, proof of real 3D separation)."""
+    if not state.item_aabbs:
+        return True
+    hx, hy = footprint_x / 2.0, footprint_y / 2.0
+    ax0, ax1 = x_center - hx, x_center + hx
+    ay0, ay1 = y_center - hy, y_center + hy
+    los = np.array([item[0] for item in state.item_aabbs])
+    his = np.array([item[1] for item in state.item_aabbs])
+    m = EXACT_CHECK_SAFETY_MARGIN
+    separated = (
+        (ax1 + m <= los[:, 0]) | (his[:, 0] + m <= ax0)
+        | (ay1 + m <= los[:, 1]) | (his[:, 1] + m <= ay0)
+        | (z1 + m <= los[:, 2]) | (his[:, 2] + m <= z0)
+    )
+    return bool(separated.all())
 
 
 def _chamfer_fits(state: ContainerState, n0: int, n1: int, fw: int, fh: int,
@@ -329,9 +367,24 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     score = np.where(fits_ceiling, score, np.inf)
     ix, iy = np.unravel_index(np.argmin(score), score.shape)
 
-    x_center = state.x_min + (ix + fw / 2.0) * state.cell_w
-    y_center = state.y_min + (iy + fh / 2.0) * state.cell_h
-    z_center = float(landing_bottom[ix, iy]) + item_height / 2.0
+    # See EXACT_CHECK_SAFETY_MARGIN above: verify the top candidate against
+    # every real item box directly, and reject/retry (never accept without
+    # checking) if the heightmap approximation let through something
+    # actually too close.
+    for _ in range(EXACT_CHECK_MAX_RETRIES):
+        if not np.isfinite(score[ix, iy]):
+            return None
+        x_center = state.x_min + (ix + fw / 2.0) * state.cell_w
+        y_center = state.y_min + (iy + fh / 2.0) * state.cell_h
+        z_bottom = float(landing_bottom[ix, iy])
+        if _exact_aabb_clear(state, x_center, y_center, footprint_x, footprint_y, z_bottom, z_bottom + item_height):
+            break
+        score[ix, iy] = np.inf
+        ix, iy = np.unravel_index(np.argmin(score), score.shape)
+    else:
+        return None
+
+    z_center = z_bottom + item_height / 2.0
 
     return {
         "x": x_center,

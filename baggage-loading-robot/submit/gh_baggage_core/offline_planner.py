@@ -92,6 +92,7 @@ def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] |
             result["x"], result["y"], dl, dw, top_z,
             is_soft=bool(item.get("is_soft", False)),
             is_prioritized=bool(item.get("is_prioritized", False)),
+            dh=dh,
         )
 
     return order
