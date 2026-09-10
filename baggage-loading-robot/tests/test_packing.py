@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from gh_baggage_core.container_state import ContainerState
 from gh_baggage_core.packing import CONTACT_TOLERANCE, LANDING_CLEARANCE, _shadowed_clear_floor, best_position
@@ -118,6 +119,37 @@ def test_stability_check_accepts_a_small_step_that_still_covers_the_center():
     assert not result["unstable"]
 
 
+def test_stability_check_flags_a_tall_narrow_box_even_with_perfect_support():
+    # A real failure this was written to catch: support_fraction and
+    # core_support_fraction can both read a perfect 1.0 (flush on a
+    # completely flat, fully-covered floor) while the box still tips in
+    # the real settle step, because neither factor has anything to do with
+    # the box's *own* shape -- a box far taller than its own base can tip
+    # over a perfectly flat floor the same way a pencil balanced on its tip
+    # doesn't need an uneven table to fall.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    # Flat, fully open floor -- support_fraction/core_support_fraction will
+    # both be a perfect 1.0 for anything landing here.
+    footprint_x, footprint_y = 0.2, 0.2
+    tall_result = best_position(state, footprint_x=footprint_x, footprint_y=footprint_y, item_height=0.6,
+                                 avoid_soft_top=True, avoid_priority_top=True)
+    assert tall_result is not None
+    assert tall_result["support_fraction"] == 1.0
+    assert tall_result["core_support_fraction"] == 1.0
+    assert tall_result["unstable"]  # the aspect-ratio check, not support, catches this
+
+
+def test_stability_check_accepts_a_short_wide_box_with_perfect_support():
+    # The same floor, the same footprint -- only much shorter (a safe
+    # aspect ratio) -- must not trip the new check.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    result = best_position(state, footprint_x=0.2, footprint_y=0.2, item_height=0.15,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    assert result["support_fraction"] == 1.0
+    assert not result["unstable"]
+
+
 def test_best_position_rejects_a_candidate_too_close_to_a_real_item_the_heightmap_missed():
     # A phantom real item placed directly into item_aabbs (bypassing
     # _mark_occupied/height_grid entirely) simulates a case the coarse
@@ -210,6 +242,45 @@ def test_shadowed_clear_floor_counts_only_still_clear_cells_strictly_behind():
     # A window in x-columns with nothing raised anywhere behind it counts
     # the full remaining depth.
     assert shadow[0, 0] == 2 * 4  # fw=2 columns, 4 clear rows behind (y=2..5)
+
+
+def test_path_clearance_requires_a_real_margin_not_just_no_overlap():
+    # The real validator's own transport check (`getClosestPoints(...,
+    # distance=safety_margin)`) flags *any* approach within that margin, not
+    # only genuine overlap -- confirmed against the real simulator: a
+    # reproduced failure had a positive 1.28cm separation, still inside the
+    # evaluation config's 1.5cm safety_margin, and still ended the episode.
+    # A single door-side row of the grid sits at some height; deeper in
+    # (larger Y) is bare floor -- reaching it means passing over that row.
+    from gh_baggage_core.packing import PATH_CLEARANCE
+
+    def best_with_door_gap(gap: float):
+        # cut_x/cut_y=0 to keep this container's (unrelated) corner-keepout
+        # band out of the way entirely.
+        state = ContainerState(dict(BASE_CONTAINER, cut_x=0.0, cut_y=0.0), grid_n=4)
+        footprint_x = state.x_max - state.x_min  # fw=grid_n: a single X-lane, no alternate column to dodge into
+        footprint_y = 3 * state.cell_h  # fh=3 -> exactly two candidate Y-anchors (iy=0 and iy=1)
+        landing_bottom_deep = state.floor_z + LANDING_CLEARANCE
+        state.height_grid[:, :] = state.floor_z
+        state.height_grid[:, 0] = landing_bottom_deep - gap
+        result = best_position(state, footprint_x=footprint_x, footprint_y=footprint_y, item_height=0.2,
+                                avoid_soft_top=True, avoid_priority_top=True)
+        return state, result
+
+    # A gap smaller than PATH_CLEARANCE: the only way to reach the deeper,
+    # genuinely lower floor is past a door-side row that's really too
+    # close, so the search must not land there -- it has to settle for
+    # landing on (or right next to) the row itself instead, which is the
+    # *higher* of the two available surfaces.
+    blocked_state, blocked = best_with_door_gap(gap=PATH_CLEARANCE / 2.0)
+    assert blocked is not None
+    assert blocked["top"] > blocked_state.floor_z
+
+    # The same setup with a gap that actually meets the real margin: the
+    # deep floor is now genuinely reachable and must win (it's lower).
+    clear_state, clear = best_with_door_gap(gap=PATH_CLEARANCE * 1.5)
+    assert clear is not None
+    assert clear["top"] == pytest.approx(clear_state.floor_z)
 
 
 def test_best_position_avoids_placement_that_requires_crossing_a_tall_item():

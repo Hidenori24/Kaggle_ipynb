@@ -47,17 +47,26 @@ def _sliding_max_axis0(arr: np.ndarray, fw: int) -> np.ndarray:
 # (see the simulator's PlacementValidator.check_transport_path -- the X
 # correction afterwards is only a few millimeters). So any already-placed
 # item sitting in the same X-columns, between the door and our candidate
-# spot, and taller than our own landing height, would be hit during entry.
+# spot, and about as tall as (or taller than) our own landing height, would
+# be grazed or hit during entry.
 #
 # Gliding along a surface that is level with (or lower than) our own
 # landing height is completely normal -- most items rest flush on the bare
 # floor, which is "in the way" of every deeper cell in exactly this sense,
-# without being an obstruction at all. So the corridor only counts as
-# blocked when something in it is genuinely *taller* than where we're
-# landing; this small epsilon exists purely for floating point safety, not
-# as a required physical standoff (that's already provided by the AABB
-# padding in ContainerState._build_from_packed_items).
-PATH_CLEARANCE = 0.005
+# without being an obstruction at all. But "in the way" has to leave real
+# clearance, not just avoid literal overlap: the validator's own transport
+# check (`_move_item`) uses `getClosestPoints(..., distance=safety_margin)`,
+# which flags *any* approach within that margin, not only a true collision
+# (confirmed against the real simulator -- a reproduced failure had a
+# genuine positive separation of 1.28cm, still inside the evaluation
+# config's 1.5cm safety_margin, and still ended the episode). The AABB
+# padding in ContainerState._build_from_packed_items only widens an
+# obstruction's X/Y footprint, not the *height* recorded for it, so it
+# provides no such margin here -- this has to enforce it directly: the
+# corridor only counts as clear once the tallest obstruction sits at least
+# PATH_CLEARANCE below our own landing height, not merely level with or a
+# hair above it.
+PATH_CLEARANCE = 0.015
 
 # `flat` (the height difference between the highest and lowest cell in the
 # footprint) is kept as a secondary scoring signal below, but the actual
@@ -80,6 +89,40 @@ CONTACT_TOLERANCE = 0.02
 MIN_SUPPORT_FRACTION = 0.6
 MIN_CORE_SUPPORT_FRACTION = 0.5
 HEIGHT_SUPPORT_SCALE = 0.25
+
+# Support-fraction/core-support-fraction can both read a perfect 1.0 --
+# resting flush on a fully flat, fully-covered surface -- and the box can
+# *still* tip in the real settle step (confirmed against the real
+# simulator: two observed failures with support_fraction == core ==
+# 1.0 and real displacement/angle far past the validator's threshold, one
+# of them a near-total flip). Perfect footprint contact says nothing about
+# whether the box's own center of mass stays over that footprint once it's
+# perturbed -- a box far taller than its own base tips over a flat floor
+# just as easily as over a gap, the same way a pencil balanced on its tip
+# doesn't need an uneven table to fall. This is an orthogonal risk from
+# everything above (which only ever looks at the *landing surface*, never
+# the item's own shape), so it needs its own check rather than folding into
+# support_fraction's own threshold -- raising that threshold can never flag
+# a candidate that's already sitting at the 1.0 ceiling.
+#
+# `aspect_ratio` is the box's own height divided by its narrower footprint
+# dimension in *this* orientation -- the ratio that determines how far the
+# item's center of mass can shift laterally (roughly proportional to base
+# width) before it moves outside the base (roughly proportional to height)
+# and gravity takes over, i.e. real tip-over physics, not a heuristic
+# stand-in for it. A cube (ratio 1) is included as still "safe"; the limit
+# tightens with landing height for the same reason the support thresholds
+# above do (settle-step perturbation and heightmap/reality drift both grow
+# with height) down to ASPECT_RATIO_MIN_LIMIT. Since a box has 3 candidate
+# orientations for "which face is down" and only the tallest one or two
+# tend to violate this, the practical effect is steering the search toward
+# laying a tall item on its side when the floor space for that is
+# available, rather than standing it upright out of sheer habit (nothing
+# before this ever compared orientations on stability grounds at all --
+# only on the resulting landing height and footprint area).
+ASPECT_RATIO_BASE_LIMIT = 1.5
+ASPECT_RATIO_MIN_LIMIT = 1.0
+ASPECT_HEIGHT_SCALE = 0.3
 
 # Large, roughly-equal penalties for the three ways a candidate can plausibly
 # get this whole episode terminated (blocked entry path, unsupported/tipping
@@ -287,7 +330,7 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
         return None
 
     path_block = _path_block_height(state, fw, top.shape[1])
-    path_clear = path_block <= (landing_bottom + PATH_CLEARANCE)
+    path_clear = (path_block + PATH_CLEARANCE) <= landing_bottom
 
     conflict = np.zeros_like(fits_ceiling, dtype=bool)
     if avoid_soft_top:
@@ -311,7 +354,21 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
 
     required_support = np.clip(MIN_SUPPORT_FRACTION + top * HEIGHT_SUPPORT_SCALE, MIN_SUPPORT_FRACTION, 0.95)
     required_core = np.clip(MIN_CORE_SUPPORT_FRACTION + top * HEIGHT_SUPPORT_SCALE, MIN_CORE_SUPPORT_FRACTION, 0.95)
-    stable = (support_fraction >= required_support) & (core_support_fraction >= required_core)
+
+    # See ASPECT_RATIO_BASE_LIMIT above: a tip-over risk that's independent
+    # of how well-supported the footprint is, so it's checked separately
+    # rather than folded into the support-fraction thresholds (which a
+    # perfect 1.0 support_fraction would always clear regardless). This is
+    # the same scalar for the whole grid -- footprint/height are fixed for
+    # this call -- so it gates `stable` uniformly rather than varying by
+    # landing spot.
+    aspect_ratio = item_height / max(min(footprint_x, footprint_y), 1e-6)
+    required_aspect_ratio = np.clip(
+        ASPECT_RATIO_BASE_LIMIT - top * ASPECT_HEIGHT_SCALE, ASPECT_RATIO_MIN_LIMIT, ASPECT_RATIO_BASE_LIMIT,
+    )
+    aspect_ok = aspect_ratio <= required_aspect_ratio
+
+    stable = (support_fraction >= required_support) & (core_support_fraction >= required_core) & aspect_ok
     in_corner_keepout = _windows(state.corner_keepout, fw, fh).any(axis=(2, 3))
 
     # How much still-clear floor, in this item's own X-columns, would this
