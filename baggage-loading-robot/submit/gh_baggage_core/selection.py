@@ -100,3 +100,64 @@ def largest_first_order(items: list[dict]) -> list[int]:
         range(len(items)),
         key=lambda i: -(items[i]["length"] * items[i]["width"] * items[i]["height"]),
     )
+
+
+DEAD_END_PENALTY = 200.0
+
+
+def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ranked: list[tuple],
+                         deadline: float | None, branch: int, steps: int):
+    """Among the top `branch` first-moves in `ranked`, prefer the one whose
+    greedy continuation over the rest of `candidates` (not the future
+    stream -- whatever the caller can already see) racks up the least
+    additional risk over `steps` further picks, rather than just the
+    locally cheapest first move. Falls back to ranked[0] if nothing beats
+    it (or there's only one candidate to begin with).
+
+    This mutates nothing in `states`; each branch works on its own
+    ContainerState.clone().
+    """
+    if len(ranked) <= 1 or branch <= 1 or steps <= 0:
+        return ranked[0]
+
+    best_branch = None
+    for first_move in ranked[:branch]:
+        if deadline is not None and time.perf_counter() > deadline:
+            break
+        score, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh) = first_move
+        cumulative = score
+
+        cloned_states = [s.clone() for s in states]
+        placed_item = candidates[candidate_idx]
+        top_z = result["z"] + dh / 2.0
+        cloned_states[c_idx].place_virtual(
+            result["x"], result["y"], dl, dw, top_z,
+            is_soft=bool(placed_item.get("is_soft", False)),
+            is_prioritized=bool(placed_item.get("is_prioritized", False)),
+        )
+        remaining = [c for i, c in enumerate(candidates) if i != candidate_idx]
+
+        depth = 0
+        while remaining and depth < steps and (deadline is None or time.perf_counter() < deadline):
+            sub_order = largest_first_order(remaining)
+            sub_candidates = [remaining[i] for i in sub_order]
+            sub_best = choose_placement(cloned_states, sub_candidates, deadline)
+            if sub_best is None:
+                cumulative += DEAD_END_PENALTY
+                break
+            sub_score, sub_cand_idx, sub_c_idx, _sub_orn, sub_result, (sdl, sdw, sdh) = sub_best
+            cumulative += sub_score
+            remaining_idx = sub_order[sub_cand_idx]
+            sub_item = remaining.pop(remaining_idx)
+            sub_top_z = sub_result["z"] + sdh / 2.0
+            cloned_states[sub_c_idx].place_virtual(
+                sub_result["x"], sub_result["y"], sdl, sdw, sub_top_z,
+                is_soft=bool(sub_item.get("is_soft", False)),
+                is_prioritized=bool(sub_item.get("is_prioritized", False)),
+            )
+            depth += 1
+
+        if best_branch is None or cumulative < best_branch[0]:
+            best_branch = (cumulative, first_move)
+
+    return best_branch[1] if best_branch is not None else ranked[0]

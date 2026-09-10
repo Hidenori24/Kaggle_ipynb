@@ -27,7 +27,7 @@ from __future__ import annotations
 import time
 
 from .container_state import ContainerState
-from .selection import choose_placement, largest_first_order
+from .selection import largest_first_order, pick_with_lookahead, rank_placements
 
 # Well under the 180s optimization_timeout so a slower/loaded evaluation
 # host can't push us over it; on timeout the harness falls back to leaving
@@ -35,6 +35,17 @@ from .selection import choose_placement, largest_first_order
 # partially-completed plan, so we always return *something* covering every
 # item -- see the `remaining` fallback below.
 TIME_BUDGET_SECONDS = 150.0
+
+# Same lookahead the online policy uses (see policy.py), applied here too:
+# a move that looks best in isolation but leaves the next item nowhere good
+# to go loses to a slightly costlier one that doesn't. Kept modest rather
+# than "as deep as the 180s budget allows" -- unlike the online policy's
+# pool (<=40), this dry run's remaining-item count can be up to 80, and
+# each unit of lookahead roughly multiplies the per-step cost, so pushing it
+# much further risks running out of planning time before the deadline
+# check below can gracefully hand off the tail to the plain heuristic order.
+LOOKAHEAD_BRANCH = 2
+LOOKAHEAD_STEPS = 1
 
 
 def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] | None:
@@ -57,14 +68,19 @@ def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] |
 
         candidate_order = largest_first_order(remaining)
         candidates = [remaining[i] for i in candidate_order]
-        best = choose_placement(states, candidates, deadline)
+        ranked = rank_placements(states, candidates, deadline)
 
-        if best is None:
+        if not ranked:
             # Nothing fits anywhere in either container any more (both
             # effectively full): nothing we could plan for the rest would
             # be trustworthy either, so just hand back what's left.
             order.extend(item["index"] for item in _fallback_ordered(remaining))
             return order
+
+        best = pick_with_lookahead(
+            states, candidates, ranked, deadline,
+            branch=LOOKAHEAD_BRANCH, steps=LOOKAHEAD_STEPS,
+        )
 
         _, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh) = best
         remaining_idx = candidate_order[candidate_idx]

@@ -19,7 +19,7 @@ import time
 import numpy as np
 
 from .container_state import ContainerState
-from .selection import choose_placement, largest_first_order, rank_placements
+from .selection import largest_first_order, pick_with_lookahead, rank_placements
 
 # The evaluation harness enforces an 8-10s wall-clock budget per policy()
 # call and, on timeout, substitutes a *random* action of its own -- which is
@@ -33,10 +33,11 @@ TIME_BUDGET_SECONDS = 5.5
 # How many of the current pool's best first-moves to actually branch on, and
 # how many additional greedy steps to simulate per branch. Kept small: cost
 # is roughly BRANCH * STEPS * pool_size * 12 best_position calls on top of
-# the base rank_placements pass, and pool_size can be up to ~40.
+# the base rank_placements pass, and pool_size can be up to ~40, all within
+# a single policy() call's 8-10s budget (unlike the offline planner, which
+# can afford to look much further ahead -- see offline_planner.py).
 LOOKAHEAD_BRANCH = 3
 LOOKAHEAD_STEPS = 1
-DEAD_END_PENALTY = 200.0
 
 
 class Policy:
@@ -70,7 +71,10 @@ class Policy:
             return self._fallback_action(observation)
 
         if len(ranked) > 1 and time.perf_counter() < deadline:
-            chosen = self._pick_with_lookahead(states, candidates, ranked, deadline)
+            chosen = pick_with_lookahead(
+                states, candidates, ranked, deadline,
+                branch=LOOKAHEAD_BRANCH, steps=LOOKAHEAD_STEPS,
+            )
         else:
             chosen = ranked[0]
 
@@ -87,55 +91,6 @@ class Policy:
             "place_pos": place_pos,
             "orientation": orn_idx,
         }
-
-    @staticmethod
-    def _pick_with_lookahead(states, candidates, ranked, deadline):
-        """Among the top LOOKAHEAD_BRANCH first-moves, prefer the one whose
-        greedy continuation over the rest of the *current pool* racks up the
-        least additional risk -- so a move that looks fine in isolation but
-        leaves nothing good for what's already visible right behind it loses
-        to a slightly costlier move that doesn't."""
-        best_branch = None
-        for branch in ranked[:LOOKAHEAD_BRANCH]:
-            if time.perf_counter() > deadline:
-                break
-            score, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh) = branch
-            cumulative = score
-
-            cloned_states = [s.clone() for s in states]
-            placed_item = candidates[candidate_idx]
-            top_z = result["z"] + dh / 2.0
-            cloned_states[c_idx].place_virtual(
-                result["x"], result["y"], dl, dw, top_z,
-                is_soft=bool(placed_item.get("is_soft", False)),
-                is_prioritized=bool(placed_item.get("is_prioritized", False)),
-            )
-            remaining = [c for i, c in enumerate(candidates) if i != candidate_idx]
-
-            depth = 0
-            while remaining and depth < LOOKAHEAD_STEPS and time.perf_counter() < deadline:
-                sub_order = largest_first_order(remaining)
-                sub_candidates = [remaining[i] for i in sub_order]
-                sub_best = choose_placement(cloned_states, sub_candidates, deadline)
-                if sub_best is None:
-                    cumulative += DEAD_END_PENALTY
-                    break
-                sub_score, sub_cand_idx, sub_c_idx, _sub_orn, sub_result, (sdl, sdw, sdh) = sub_best
-                cumulative += sub_score
-                remaining_idx = sub_order[sub_cand_idx]
-                sub_item = remaining.pop(remaining_idx)
-                sub_top_z = sub_result["z"] + sdh / 2.0
-                cloned_states[sub_c_idx].place_virtual(
-                    sub_result["x"], sub_result["y"], sdl, sdw, sub_top_z,
-                    is_soft=bool(sub_item.get("is_soft", False)),
-                    is_prioritized=bool(sub_item.get("is_prioritized", False)),
-                )
-                depth += 1
-
-            if best_branch is None or cumulative < best_branch[0]:
-                best_branch = (cumulative, branch)
-
-        return best_branch[1] if best_branch is not None else ranked[0]
 
     @staticmethod
     def _fallback_action(observation: dict) -> dict:

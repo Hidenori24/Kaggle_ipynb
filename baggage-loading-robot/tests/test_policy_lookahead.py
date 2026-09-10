@@ -1,4 +1,5 @@
-"""Tests for the online policy's shallow lookahead (Policy._pick_with_lookahead).
+"""Tests for the shared shallow lookahead (selection.pick_with_lookahead),
+used by both the online policy and the offline planner.
 
 Rather than trying to organically construct a full pool/container scenario
 where the numerics happen to disagree with pure greedy (fragile and hard to
@@ -7,7 +8,7 @@ small, controlled inputs: a "cheap now, dead end next" branch should lose to
 a "slightly costlier now, but leaves the rest placeable" branch.
 """
 from gh_baggage_core.container_state import ContainerState
-from gh_baggage_core.policy import Policy
+from gh_baggage_core.selection import pick_with_lookahead
 
 BASE_CONTAINER = {
     "index": 0, "length": 2.0, "width": 1.5, "height": 1.6, "thickness": 0.04,
@@ -43,7 +44,7 @@ def test_lookahead_avoids_branch_that_dead_ends_the_rest_of_the_pool(monkeypatch
     # "costly" branch's continuation to succeed cheaply -- this is exactly
     # the situation a purely greedy pick (ranked[0] == cheap_branch) gets
     # wrong, and what the lookahead exists to catch.
-    import gh_baggage_core.policy as policy_module
+    import gh_baggage_core.selection as selection_module
 
     def fake_choose_placement(states, sub_candidates, deadline):
         # `candidates[0]` was placed by cheap_branch; only candidates[1]'s
@@ -53,17 +54,28 @@ def test_lookahead_avoids_branch_that_dead_ends_the_rest_of_the_pool(monkeypatch
             return None  # cheap branch's continuation: nothing fits
         return (0.01, 0, 0, 0, fake_result(0.5, 0.5, 0.15, 0.01), (0.2, 0.2, 0.1))
 
-    monkeypatch.setattr(policy_module, "choose_placement", fake_choose_placement)
+    monkeypatch.setattr(selection_module, "choose_placement", fake_choose_placement)
 
-    chosen = Policy._pick_with_lookahead([state], candidates, ranked, deadline=float("inf"))
+    chosen = pick_with_lookahead([state], candidates, ranked, deadline=float("inf"), branch=3, steps=1)
     assert chosen is costly_branch
 
 
-def test_lookahead_falls_back_to_ranked_first_when_no_branch_beats_it(monkeypatch):
+def test_lookahead_falls_back_to_ranked_first_when_no_branch_beats_it():
     state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
     candidates = [make_item(0)]
     only_branch = (0.05, 0, 0, 0, fake_result(0.0, 0.0, 0.15, 0.05), (0.4, 0.4, 0.2))
     ranked = [only_branch]
 
-    chosen = Policy._pick_with_lookahead([state], candidates, ranked, deadline=float("inf"))
+    chosen = pick_with_lookahead([state], candidates, ranked, deadline=float("inf"), branch=3, steps=1)
     assert chosen is only_branch
+
+
+def test_lookahead_disabled_returns_ranked_first(monkeypatch):
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    candidates = [make_item(0), make_item(1)]
+    cheap_branch = (0.05, 0, 0, 0, fake_result(0.0, 0.0, 0.15, 0.05), (0.4, 0.4, 0.2))
+    costly_branch = (0.20, 1, 0, 0, fake_result(0.3, 0.3, 0.3, 0.20), (0.4, 0.4, 0.2))
+    ranked = [cheap_branch, costly_branch]
+
+    chosen = pick_with_lookahead([state], candidates, ranked, deadline=float("inf"), branch=1, steps=0)
+    assert chosen is cheap_branch
