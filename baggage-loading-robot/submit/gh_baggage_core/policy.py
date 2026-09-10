@@ -19,6 +19,8 @@ import time
 import numpy as np
 
 from .container_state import ContainerState
+from .geometry import NUM_ORIENTATIONS, oriented_dims
+from .packing import best_effort_position
 from .selection import largest_first_order, pick_with_lookahead, rank_placements
 
 # The evaluation harness enforces an 8-10s wall-clock budget per policy()
@@ -95,22 +97,73 @@ class Policy:
     @staticmethod
     def _fallback_action(observation: dict) -> dict:
         # Only reached when best_position found nowhere valid for *any*
-        # pool item/orientation (an effectively full container) or the main
-        # search raised, so there's no guarantee this specific spot is
-        # collision-free either -- but it must at least satisfy the
-        # inclusion check on its own, which a bare `thickness` floor height
-        # does not (see ContainerState.floor_z's SAFETY_MARGIN).
+        # pool item/orientation/container (an effectively full set of
+        # containers for this item's height budget -- see
+        # best_effort_position's docstring) or the main search raised.
+        # Always place pool item 0: with nothing ranked, there's no
+        # search-backed reason to prefer any other pool index, and the
+        # item chosen here only has to be *some* legal index (see
+        # PlacementValidator.check_action).
+        #
+        # This used to warp straight to a flat, unverified (0, 0) guess.
+        # Reproduced against the real simulator, that guess landed squarely
+        # on top of four already-packed items at once (a collision distance
+        # of -5cm to -8.6cm, not a near miss) -- turning a spot where nothing
+        # was going to fit anyway into the *worst* way to fail it. Searching
+        # every container/orientation for the lowest real landing spot
+        # (still verified against every already-placed item's exact box)
+        # can only do as well or better: a resulting inclusion/ceiling
+        # failure ends the episode exactly like any other failure already
+        # does, but a resulting collision failure is no longer near-certain.
         container_list = observation.get("container_list") or []
         pool_list = observation.get("pool_list") or []
-        if container_list:
+        if not container_list or not pool_list:
+            return {
+                "item_idx": 0,
+                "container_idx": 0,
+                "place_pos": np.array([0.0, 0.0, 0.5], dtype=np.float32),
+                "orientation": 0,
+            }
+
+        item = pool_list[0]
+        length = float(item.get("length", 0.2))
+        width = float(item.get("width", 0.2))
+        height = float(item.get("height", 0.2))
+
+        best = None  # (z, container_idx, orn_idx, result)
+        for c_idx, container in enumerate(container_list):
             try:
-                state = ContainerState(container_list[0])
-                item_h = float(pool_list[0]["height"]) if pool_list else 0.2
-                z = min(state.floor_z + item_h / 2.0, state.ceiling_z - item_h / 2.0)
-                place_pos = np.array([0.0, 0.0, z], dtype=np.float32)
+                state = ContainerState(container)
             except Exception:
-                place_pos = np.array([0.0, 0.0, 0.5], dtype=np.float32)
-        else:
+                continue
+            for orn_idx in range(NUM_ORIENTATIONS):
+                dl, dw, dh = oriented_dims(length, width, height, orn_idx)
+                try:
+                    result = best_effort_position(state, dl, dw, dh)
+                except Exception:
+                    continue
+                if best is None or result["z"] < best[0]:
+                    best = (result["z"], c_idx, orn_idx, result)
+
+        if best is not None:
+            _, c_idx, orn_idx, result = best
+            place_pos = np.array([result["x"], result["y"], result["z"]], dtype=np.float32)
+            return {
+                "item_idx": 0,
+                "container_idx": c_idx,
+                "place_pos": place_pos,
+                "orientation": orn_idx,
+            }
+
+        # Every container/orientation raised (a malformed observation, not
+        # just a full container -- best_effort_position itself always
+        # returns something for any real container): the same bare guess
+        # as before, strictly as a last resort.
+        try:
+            state = ContainerState(container_list[0])
+            z = min(state.floor_z + height / 2.0, state.ceiling_z - height / 2.0)
+            place_pos = np.array([0.0, 0.0, z], dtype=np.float32)
+        except Exception:
             place_pos = np.array([0.0, 0.0, 0.5], dtype=np.float32)
         return {
             "item_idx": 0,

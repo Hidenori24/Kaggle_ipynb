@@ -459,3 +459,65 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
         "fw": fw,
         "fh": fh,
     }
+
+
+# How many of the lowest-landing candidates `best_effort_position` will try
+# against the exact box check before giving up and returning its single
+# best (lowest) guess unverified. Mirrors EXACT_CHECK_MAX_RETRIES's role in
+# `best_position`, just sized for a colder path: this only ever runs once
+# `best_position` has already failed for every orientation in every
+# container (see its docstring), so it can afford to look harder than the
+# 20 retries the hot path budgets for.
+BEST_EFFORT_MAX_CANDIDATES = 200
+
+
+def best_effort_position(state: ContainerState, footprint_x: float, footprint_y: float,
+                          item_height: float) -> dict:
+    """Last-resort landing spot for when `best_position` finds nowhere
+    valid *anywhere* -- every orientation, every container (see
+    `rank_placements`'s "Returns [] if nothing fits anywhere for anyone").
+    That only happens when the tallest obstruction under every possible
+    footprint window already leaves no room under that window's own
+    ceiling, i.e. a real, height-budget dead end, not something a better
+    (x, y) choice under the same ceiling constraint could fix.
+
+    The caller (`Policy._fallback_action`) still has to hand the
+    environment *some* placement, so this drops the one constraint that
+    dead end is actually about -- `fits_ceiling` -- and returns the single
+    lowest-landing spot on the grid instead, still checked against every
+    real item's exact box (same margin `best_position`'s own retry loop
+    uses) so it never trades a now-likely inclusion/ceiling failure for a
+    still-avoidable collision. An inclusion/ceiling failure ends the
+    episode exactly like any other failure does (see env.py) -- no worse
+    than today -- but a bare, unverified guess measured against the real
+    simulator landed squarely on top of four already-packed items at once
+    (a collision distance of -5cm to -8.6cm, not a near miss), which this
+    is written specifically to stop being the near-certain outcome.
+    """
+    n = state.grid_n
+    fw = max(1, min(n, int(math.ceil(footprint_x / max(state.cell_w, 1e-6)))))
+    fh = max(1, min(n, int(math.ceil(footprint_y / max(state.cell_h, 1e-6)))))
+
+    top_windows = _windows(state.height_grid, fw, fh)
+    top = top_windows.max(axis=(2, 3))
+    landing_bottom = (top + LANDING_CLEARANCE).reshape(-1)
+    order = np.argsort(landing_bottom)
+
+    fallback_x = fallback_y = fallback_z_bottom = None
+    for rank, flat_idx in enumerate(order):
+        ix, iy = np.unravel_index(int(flat_idx), top.shape)
+        x_center = state.x_min + (ix + fw / 2.0) * state.cell_w
+        y_center = state.y_min + (iy + fh / 2.0) * state.cell_h
+        z_bottom = float(landing_bottom[flat_idx])
+        if fallback_x is None:
+            fallback_x, fallback_y, fallback_z_bottom = x_center, y_center, z_bottom
+        if rank >= BEST_EFFORT_MAX_CANDIDATES:
+            break
+        if _exact_aabb_clear(state, x_center, y_center, footprint_x, footprint_y, z_bottom, z_bottom + item_height):
+            return {"x": x_center, "y": y_center, "z": z_bottom + item_height / 2.0}
+
+    # Every candidate tried was still too close to something real: hand
+    # back the single lowest spot anyway (unverified) rather than nothing
+    # -- still strictly the same landing height a from-scratch heightmap
+    # search would have picked, unlike the old flat (0, 0) guess.
+    return {"x": fallback_x, "y": fallback_y, "z": fallback_z_bottom + item_height / 2.0}
