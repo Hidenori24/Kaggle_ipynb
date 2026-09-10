@@ -323,7 +323,19 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     score = top * 1000.0 + flat * flat_weight + deep_bias + ix_grid * 1e-4
     score = score + item_height * shadow_area * SHADOW_BLOCK_WEIGHT
     score = score + (~path_clear) * RISK_PENALTY
-    score = score + (~stable) * RISK_PENALTY
+    # RISK_PENALTY alone makes any `stable` option beat any unstable one, but
+    # says nothing about *which* unstable option to prefer when literally
+    # nothing on the grid is stable (a real, observed case: the container
+    # can become saturated enough that every remaining item's best spot is
+    # below threshold everywhere). In that situation a candidate that
+    # narrowly misses the support requirement is a materially safer bet than
+    # one that misses it badly, so add a graduated term on top of the flat
+    # penalty, scaled well above `flat`'s own tie-break-only role, so it
+    # actually decides between two already-unstable candidates instead of
+    # `top`/`flat` doing so by coincidence.
+    support_deficiency = np.clip(required_support - support_fraction, 0.0, None)
+    core_deficiency = np.clip(required_core - core_support_fraction, 0.0, None)
+    score = score + (~stable) * (RISK_PENALTY + (support_deficiency + core_deficiency) * 2000.0)
     score = score + in_corner_keepout * RISK_PENALTY
     score = score + conflict * 0.5
     score = np.where(fits_ceiling, score, np.inf)
