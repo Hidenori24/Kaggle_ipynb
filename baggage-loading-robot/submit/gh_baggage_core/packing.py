@@ -2,7 +2,9 @@
 given footprint on a container's heightmap, using a heightmap/skyline
 "place lowest & flattest" heuristic (a discretized variant of the classic
 extreme-point / deepest-bottom-left-fill family of 3D bin-packing
-constructors).
+constructors) gated by a coarse static-equilibrium stability check (see
+the comment on CONTACT_TOLERANCE / MIN_SUPPORT_FRACTION below) rather than
+a bare height-range threshold.
 """
 from __future__ import annotations
 
@@ -57,15 +59,27 @@ def _sliding_max_axis0(arr: np.ndarray, fw: int) -> np.ndarray:
 # padding in ContainerState._build_from_packed_items).
 PATH_CLEARANCE = 0.005
 
-# `flat` is the height difference between the highest and lowest cell in the
-# footprint -- a large value means the item would only really touch down on
-# a small sliver (e.g. the corner of a shorter neighbor) while the rest of
-# its base hangs unsupported in the air. In practice that reliably tips the
-# item over during the physics settle step, which -- exactly like a blocked
-# entry path -- ends the whole episode (place_item failing marks the step
-# terminated). So "reasonably flat support" is treated as a near-hard
-# requirement, on the same footing as a clear entry path.
-FLAT_TOLERANCE = 0.03
+# `flat` (the height difference between the highest and lowest cell in the
+# footprint) is kept as a secondary scoring signal below, but the actual
+# go/no-go stability call is a coarse static-equilibrium check instead: a
+# rigid box settles flush onto whatever is tallest within its footprint, so
+# only the cells within CONTACT_TOLERANCE of that top height actually bear
+# any load -- everywhere else is a gap the box bridges over. Two boxes can
+# have the same `flat` (max-min height range) with very different amounts
+# of *actual* contact area, and `flat` alone says nothing about *where*
+# that contact is relative to the box's own center of mass (dead center,
+# always, for a uniform box) -- a small contact patch tucked in one corner
+# tips even if the range itself looks tame. So stability requires both:
+#   - enough of the footprint is actually in contact (SUPPORT_FRACTION), and
+#   - the box's own center isn't hanging over a gap (CORE_SUPPORT_FRACTION,
+#     checked over the middle half of the footprint specifically).
+# Both requirements are tightened with height for the same reason `flat`
+# used to be: more torque, and more accumulated drift between this
+# heightmap and the real settled geometry, the higher up the landing is.
+CONTACT_TOLERANCE = 0.02
+MIN_SUPPORT_FRACTION = 0.6
+MIN_CORE_SUPPORT_FRACTION = 0.5
+HEIGHT_SUPPORT_SCALE = 0.25
 
 # Large, roughly-equal penalties for the three ways a candidate can plausibly
 # get this whole episode terminated (blocked entry path, unsupported/tipping
@@ -139,12 +153,23 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     if avoid_priority_top:
         conflict |= _windows(state.top_prioritized, fw, fh).any(axis=(2, 3))
 
-    # Require flatter support the higher up the landing is: a settling
-    # discrepancy of a few mm on the item below is a bigger deal on top of
-    # a tall, complex, multi-item stack (more torque, more accumulated
-    # drift from what this heightmap assumes) than it is resting near the
-    # floor.
-    stable = flat <= (FLAT_TOLERANCE / (1.0 + top))
+    # Static-equilibrium-style stability check (see the comment on the
+    # constants above): a cell only counts as load-bearing if it's within
+    # CONTACT_TOLERANCE of the resting height `top`, and we require both
+    # enough total contact area and that the box's own center isn't
+    # hanging over a gap.
+    contact_mask = top_windows >= (top[:, :, None, None] - CONTACT_TOLERANCE)
+    support_fraction = contact_mask.mean(axis=(2, 3))
+
+    core_x0 = fw // 4
+    core_x1 = core_x0 + max(1, fw - 2 * core_x0)
+    core_y0 = fh // 4
+    core_y1 = core_y0 + max(1, fh - 2 * core_y0)
+    core_support_fraction = contact_mask[:, :, core_x0:core_x1, core_y0:core_y1].mean(axis=(2, 3))
+
+    required_support = np.clip(MIN_SUPPORT_FRACTION + top * HEIGHT_SUPPORT_SCALE, MIN_SUPPORT_FRACTION, 0.95)
+    required_core = np.clip(MIN_CORE_SUPPORT_FRACTION + top * HEIGHT_SUPPORT_SCALE, MIN_CORE_SUPPORT_FRACTION, 0.95)
+    stable = (support_fraction >= required_support) & (core_support_fraction >= required_core)
     in_corner_keepout = _windows(state.corner_keepout, fw, fh).any(axis=(2, 3))
 
     # `fits_ceiling` is a genuine hard constraint (there is no way to make an
@@ -200,6 +225,8 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
         "z": z_center,
         "top": float(top[ix, iy]),
         "flat": float(flat[ix, iy]),
+        "support_fraction": float(support_fraction[ix, iy]),
+        "core_support_fraction": float(core_support_fraction[ix, iy]),
         "conflict": bool(conflict[ix, iy]),
         "path_blocked": not bool(path_clear[ix, iy]),
         "unstable": not bool(stable[ix, iy]),

@@ -1,5 +1,5 @@
 from gh_baggage_core.container_state import ContainerState
-from gh_baggage_core.packing import LANDING_CLEARANCE, best_position
+from gh_baggage_core.packing import CONTACT_TOLERANCE, LANDING_CLEARANCE, best_position
 
 BASE_CONTAINER = {
     "index": 0,
@@ -69,6 +69,51 @@ def test_best_position_returns_none_when_item_too_tall():
     result = best_position(state, footprint_x=0.3, footprint_y=0.3, item_height=10.0,
                             avoid_soft_top=True, avoid_priority_top=True)
     assert result is None
+
+
+def test_stability_check_catches_off_center_support_a_flat_range_check_would_miss():
+    # A "picture frame" of raised cells around a hollow, unraised center:
+    # the height *range* between the highest and lowest cell here is
+    # substantial (would trip a naive max-min-height "flat" threshold too),
+    # but the interesting case is that the raised border alone already
+    # covers most of the footprint's *area* (a plain support-fraction
+    # check, with no notion of *where* the support is, could wrongly call
+    # this fine) while the box's own center -- where its weight actually
+    # bears down -- hangs directly over the unsupported hollow.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=8)
+    border_top = state.floor_z + 0.3
+    state.height_grid[:, :] = state.floor_z
+    state.height_grid[0:2, :] = border_top
+    state.height_grid[6:8, :] = border_top
+    state.height_grid[:, 0:2] = border_top
+    state.height_grid[:, 6:8] = border_top
+    # Sanity check the fixture: border cells clearly outnumber the hollow.
+    assert (state.height_grid == border_top).mean() > 0.6
+
+    footprint = (state.x_max - state.x_min), (state.y_max - state.y_min)
+    result = best_position(state, footprint_x=footprint[0], footprint_y=footprint[1], item_height=0.2,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    assert result["support_fraction"] > 0.6
+    assert result["core_support_fraction"] < 0.5
+    assert result["unstable"]
+
+
+def test_stability_check_accepts_a_small_step_that_still_covers_the_center():
+    # The mirror image: most of the footprint (including dead center) sits
+    # at one height, with only a small strip noticeably lower -- a large
+    # max-min "flat" range, but genuinely well supported underneath the
+    # box's own center of mass, unlike the case above.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=8)
+    state.height_grid[:, :] = state.floor_z + 0.3
+    state.height_grid[0:1, :] = state.floor_z  # a thin low strip at one edge
+
+    footprint = (state.x_max - state.x_min), (state.y_max - state.y_min)
+    result = best_position(state, footprint_x=footprint[0], footprint_y=footprint[1], item_height=0.2,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    assert result["flat"] > CONTACT_TOLERANCE * 2  # a real height-range gap
+    assert not result["unstable"]
 
 
 def test_best_position_avoids_placement_that_requires_crossing_a_tall_item():
