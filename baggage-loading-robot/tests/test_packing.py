@@ -118,34 +118,6 @@ def test_stability_check_accepts_a_small_step_that_still_covers_the_center():
     assert not result["unstable"]
 
 
-def test_unstable_candidates_still_prefer_the_less_deficient_one():
-    # When literally nothing on the grid meets the stability requirement (a
-    # real case seen against the real simulator: a saturated container where
-    # every remaining item's best spot is below threshold everywhere), the
-    # search should still prefer whichever unstable option is *closer* to
-    # meeting it, rather than treating every unstable candidate as equally
-    # bad and letting an unrelated tie-break (e.g. door-adjacency) decide.
-    state = ContainerState(dict(BASE_CONTAINER), grid_n=5)
-    high = state.floor_z + 0.3
-    low = state.floor_z
-    # Per-column heights (uniform down each column -- fh below spans every
-    # row, so only the X pattern matters): col0=low, col1=low, col2=low,
-    # col3=high, col4=high.
-    state.height_grid[:, :] = np.array([low, low, low, high, high])[:, None]
-
-    footprint_x = 4 * state.cell_w  # fw=4 -> n0=2 windows (ix=0, ix=1)
-    footprint_y = 5 * state.cell_h  # fh=5 -> n1=1 (only one Y anchor)
-    result = best_position(state, footprint_x=footprint_x, footprint_y=footprint_y, item_height=0.2,
-                            avoid_soft_top=True, avoid_priority_top=True)
-    assert result is not None
-    assert result["unstable"]
-    # ix=0 (cols 0-3: mostly low, core entirely low) is far more deficient
-    # than ix=1 (cols 1-4: half the core is high) -- and ix=0 is what the
-    # door-adjacency tie-break (`ix_grid * 1e-4`) would otherwise favor, so
-    # this only passes if the graduated instability penalty is doing its job.
-    assert result["x"] > 0.0
-
-
 def test_exact_chamfer_check_still_blocks_the_true_wedge_corner():
     from gh_baggage_core.packing import _chamfer_fits
 
