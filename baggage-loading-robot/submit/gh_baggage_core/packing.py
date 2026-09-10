@@ -139,7 +139,12 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     if avoid_priority_top:
         conflict |= _windows(state.top_prioritized, fw, fh).any(axis=(2, 3))
 
-    stable = flat <= FLAT_TOLERANCE
+    # Require flatter support the higher up the landing is: a settling
+    # discrepancy of a few mm on the item below is a bigger deal on top of
+    # a tall, complex, multi-item stack (more torque, more accumulated
+    # drift from what this heightmap assumes) than it is resting near the
+    # floor.
+    stable = flat <= (FLAT_TOLERANCE / (1.0 + top))
     in_corner_keepout = _windows(state.corner_keepout, fw, fh).any(axis=(2, 3))
 
     # `fits_ceiling` is a genuine hard constraint (there is no way to make an
@@ -165,10 +170,19 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     # is what actually decides "least bad" in favor of the smallest
     # unsupported gap (most likely to survive settling) rather than just the
     # lowest height.
+    #
+    # The same gap is also more dangerous the higher up it is (more torque,
+    # further to fall, and a physics-settle drift of a few mm on the item
+    # below is a larger fraction of a small footprint than a large one) --
+    # and it's exactly at height that real settled positions drift furthest
+    # from what this heightmap assumes. So weight `flat` more heavily as
+    # `top` grows, to keep a real but close call from tipping toward the
+    # riskier option under that drift.
+    flat_weight = 500.0 * (1.0 + top)
     n_iy = max(top.shape[1] - 1, 1)
     ix_grid, iy_grid = np.meshgrid(np.arange(top.shape[0]), np.arange(top.shape[1]), indexing="ij")
     deep_bias = -(iy_grid / n_iy) * DEEP_BIAS_WEIGHT
-    score = top * 1000.0 + flat * 500.0 + deep_bias + ix_grid * 1e-4
+    score = top * 1000.0 + flat * flat_weight + deep_bias + ix_grid * 1e-4
     score = score + (~path_clear) * RISK_PENALTY
     score = score + (~stable) * RISK_PENALTY
     score = score + in_corner_keepout * RISK_PENALTY
