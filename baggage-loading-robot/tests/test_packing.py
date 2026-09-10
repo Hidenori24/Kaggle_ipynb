@@ -1,3 +1,5 @@
+import numpy as np
+
 from gh_baggage_core.container_state import ContainerState
 from gh_baggage_core.packing import CONTACT_TOLERANCE, LANDING_CLEARANCE, best_position
 
@@ -114,6 +116,34 @@ def test_stability_check_accepts_a_small_step_that_still_covers_the_center():
     assert result is not None
     assert result["flat"] > CONTACT_TOLERANCE * 2  # a real height-range gap
     assert not result["unstable"]
+
+
+def test_exact_chamfer_check_still_blocks_the_true_wedge_corner():
+    from gh_baggage_core.packing import _chamfer_fits
+
+    container = dict(BASE_CONTAINER)
+    container["n_vecs"] = [
+        (0.0, 0.0, -1.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0),
+        (-0.7071, 0.0, -0.7071), (0.0, -1.0, 0.0), (0.0, 1.0, 0.0),
+    ]
+    container["points"] = [
+        (0.0, 0.0, 0.04), (0.96, 0.0, 0.8), (0.0, 0.0, 1.56), (-0.96, 0.0, 0.8),
+        (-0.96, 0.0, 0.44), (0.0, -0.71, 0.8), (0.0, 0.71, 0.8),
+    ]
+    state = ContainerState(container, grid_n=16)
+
+    # A single window landing right at the wedge tip (x close to x_min, low
+    # z) must be rejected...
+    wedge_z = np.array([[0.1]])
+    assert not _chamfer_fits(state, n0=1, n1=1, fw=1, fh=1, z_center=wedge_z,
+                              hx=0.02, hy=0.02, hz=0.02).all()
+
+    # ...but the same footprint higher up in the band, clear of the wedge,
+    # must still be accepted (this is exactly the volume the old crude
+    # "block the whole band" approximation used to waste).
+    clear_z = np.array([[0.9]])
+    assert _chamfer_fits(state, n0=1, n1=1, fw=1, fh=1, z_center=clear_z,
+                          hx=0.02, hy=0.02, hz=0.02).all()
 
 
 def test_best_position_avoids_placement_that_requires_crossing_a_tall_item():

@@ -62,10 +62,43 @@ class ContainerState:
         self.top_prioritized = np.zeros((grid_n, grid_n), dtype=bool)
         self.corner_keepout = np.zeros((grid_n, grid_n), dtype=bool)
 
+        # The container's exact geometric half-space representation (same
+        # data the validator's own `check_inclusion` uses): a list of plane
+        # normals (`n_vecs`) and a point on each plane (`points`). We only
+        # need the one that isn't axis-aligned -- the chamfer -- since every
+        # other wall is already handled exactly by the scalar bounds above
+        # (the grid's cell-edge window semantics make those checks exact
+        # regardless of item size). Stored as local-frame (normal, point);
+        # `None` if the observation doesn't carry this data (e.g. synthetic
+        # test fixtures), in which case callers fall back to the coarser
+        # band-based approximation.
+        self._chamfer_normal, self._chamfer_point = self._find_chamfer_plane(
+            container.get("n_vecs"), container.get("points"),
+        )
+
         if self.has_shelf:
             self._apply_shelf_ceiling()
         self._apply_cut_corner_keepout()
         self._build_from_packed_items(container.get("packed_items", []) or [])
+
+    def _find_chamfer_plane(self, n_vecs, points):
+        """Identify the chamfer's plane among `n_vecs`/`points`: every other
+        container wall/floor/ceiling plane has a normal aligned to a single
+        axis, while the chamfer's is a diagonal (x/z) normal. Returns
+        (normal, point) in local coordinates, or (None, None) if the data
+        isn't available or no diagonal plane is found.
+        """
+        if not n_vecs or not points or len(n_vecs) != len(points):
+            return None, None
+        for n_vec, point in zip(n_vecs, points):
+            n = np.asarray(n_vec, dtype=np.float64).reshape(-1)
+            if n.shape[0] < 3:
+                continue
+            significant = np.abs(n) > 0.1
+            if significant.sum() >= 2:
+                local_point = (self.local_x(float(point[0])), float(point[1]), float(point[2]))
+                return n, local_point
+        return None, None
 
     def _apply_shelf_ceiling(self) -> None:
         """Conservative simplification: treat the internal shelf plane as a
@@ -126,22 +159,24 @@ class ContainerState:
         prefer landing spots outside of it, without banning it outright (it
         is still real, usable volume once nothing else is available).
 
-        The same band also always hosts a physical "small shelf" ledge
-        around mid-height (`Container._create_small_shelf` runs whether or
-        not `require_shelf` is set), which we don't otherwise model at all.
-        Rather than track its thin, hard-to-pin-down real position exactly,
-        we treat the whole band as fully unusable (not just discouraged, as
-        `in_corner_keepout` scoring alone would give it) -- it's a narrow
-        strip that's already avoided almost everywhere else, so sacrificing
-        its low chamfer pocket too costs little fill capacity in exchange
-        for closing off a collision we otherwise have no way to see coming.
+        This keepout is purely a risk-scoring signal for that forced detour
+        -- it does NOT block the geometric chamfer volume itself any more.
+        Whether a candidate box actually fits under the chamfer is instead
+        checked exactly in `packing.best_position`, using `_chamfer_normal`/
+        `_chamfer_point` when available (falling back to leaving the whole
+        band at `ceiling_z`, as before, only when that exact data is
+        missing -- see `_apply_cut_corner_keepout`'s docstring history).
         """
         if self.cut_x <= 0 or self.cut_y <= 0:
             return
         band_cells = max(1, int(math.ceil(self.cut_x / max(self.cell_w, 1e-6))))
         band_cells = min(band_cells, self.grid_n - 1)
-        self.height_grid[:band_cells, :] = self.ceiling_z
         self.corner_keepout[:band_cells, :] = True
+        if self._chamfer_normal is None:
+            # No exact plane data available (e.g. a synthetic test fixture):
+            # fall back to the old conservative hard block so we never plan
+            # a placement into a corner we can't actually verify.
+            self.height_grid[:band_cells, :] = self.ceiling_z
 
     def _grid_index_range(self, x0: float, x1: float, y0: float, y1: float):
         ix0 = int(math.floor((x0 - self.x_min) / self.cell_w))

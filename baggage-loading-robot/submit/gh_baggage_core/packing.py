@@ -106,6 +106,17 @@ DEEP_BIAS_WEIGHT = 150.0
 # one via ContainerState.floor_z) keeps that from turning into a graze.
 LANDING_CLEARANCE = 0.025
 
+# The validator's own `check_inclusion` requires, for every container-wall
+# plane, dot = n.(center - point) + |n|.half_extents <= inclusion_margin
+# (-0.005 m in the evaluation config). Every wall except the chamfer is
+# already handled exactly by ContainerState's scalar x/y/z bounds (their
+# SAFETY_MARGIN-padded cell-edge windows are exact regardless of item size).
+# Only the chamfer's diagonal plane needs this direct check, using the same
+# formula -- plus the same SAFETY_MARGIN the other walls use, since we're
+# working from a coarse heightmap grid rather than continuous coordinates.
+CHAMFER_INCLUSION_MARGIN = -0.005
+CHAMFER_SAFETY_MARGIN = 0.012
+
 
 def _path_block_height(state: ContainerState, fw: int, n_iy: int) -> np.ndarray:
     """For every (ix, iy) anchor, the tallest obstruction in the entry
@@ -117,6 +128,28 @@ def _path_block_height(state: ContainerState, fw: int, n_iy: int) -> np.ndarray:
     if n_iy > 1:
         path_block[:, 1:n_iy] = block_by_col[:, 0:n_iy - 1]
     return path_block
+
+
+def _chamfer_fits(state: ContainerState, n0: int, n1: int, fw: int, fh: int,
+                   z_center: np.ndarray, hx: float, hy: float, hz: float) -> np.ndarray:
+    """Exact per-window inclusion check against the chamfer plane, replacing
+    the coarse "whole band blocked" approximation `ContainerState` used to
+    apply directly to the heightmap. Uses the same half-space formula the
+    simulator's own validator does (see the CHAMFER_* constants above):
+    a box is on the legal side of the plane iff the *farthest* corner of its
+    AABB, projected onto the plane's outward normal, doesn't cross it.
+    """
+    n = state._chamfer_normal
+    px, py, pz = state._chamfer_point
+    x_center = state.x_min + (np.arange(n0) + fw / 2.0) * state.cell_w
+    y_center = state.y_min + (np.arange(n1) + fh / 2.0) * state.cell_h
+    dot = (
+        n[0] * (x_center[:, None] - px)
+        + n[1] * (y_center[None, :] - py)
+        + n[2] * (z_center - pz)
+        + abs(n[0]) * hx + abs(n[1]) * hy + abs(n[2]) * hz
+    )
+    return dot <= (CHAMFER_INCLUSION_MARGIN - CHAMFER_SAFETY_MARGIN)
 
 
 def best_position(state: ContainerState, footprint_x: float, footprint_y: float, item_height: float,
@@ -141,6 +174,13 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     # restrictive within the window.
     window_ceiling = _windows(state.ceiling_grid, fw, fh).min(axis=(2, 3))
     fits_ceiling = (landing_bottom + item_height) <= (window_ceiling + 1e-6)
+
+    if state._chamfer_normal is not None:
+        fits_ceiling &= _chamfer_fits(
+            state, top.shape[0], top.shape[1], fw, fh,
+            landing_bottom + item_height / 2.0, footprint_x / 2.0, footprint_y / 2.0, item_height / 2.0,
+        )
+
     if not fits_ceiling.any():
         return None
 
