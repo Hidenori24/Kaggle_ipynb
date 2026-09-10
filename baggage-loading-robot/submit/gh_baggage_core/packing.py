@@ -124,6 +124,45 @@ ASPECT_RATIO_BASE_LIMIT = 1.5
 ASPECT_RATIO_MIN_LIMIT = 1.0
 ASPECT_HEIGHT_SCALE = 0.3
 
+# Three real-simulator failures (see DESIGN.md) all had support_fraction
+# == core_support_fraction == 1.0 and flat == 0.0 -- a heightmap-perfect,
+# fully flat, fully covered landing -- yet still displaced far past the
+# validator's threshold in the real settle step. Inspecting the real
+# packed items behind each failure (not just the heightmap) showed why:
+# the "flat" surface was a patchwork of *multiple separate* items that
+# happened to share the exact same recorded top height (routine when
+# several identical items land at the same layer), not one single rigid
+# support. `height_grid` only ever stores "how tall," never "whose," so
+# nothing above can tell a single pedestal from a seam between two
+# independently-settled ones -- each contributing item has its own small
+# settle tolerance, so a box bridging the seam is resting on two things
+# that can each move a little, not one that can't, the same kind of
+# heightmap blind spot ASPECT_RATIO_BASE_LIMIT exists to catch for the
+# item's own shape, just on the support side. A blanket fix already tried
+# for this same trio (scaling LANDING_CLEARANCE with height) regressed
+# broadly across the benchmark suite (see DESIGN.md) by adding pointless
+# buffer under perfectly fine single-item stacks too -- this instead only
+# fires for the specific shape those failures had in common: bridging a
+# real seam.
+#
+# SUPPORT_SEAM_HEIGHT_MIN gates it off near the floor, where several items
+# abutting side by side is completely normal, not a stacking risk -- but
+# it turns out to matter well beyond that: at the failures' own height
+# range (0.3), this flagged far more seams than it saved, regressing the
+# 8-scenario benchmark suite broadly (mean fill_score 13.40 -> 12.23,
+# worst single case -6.18) -- most seams a couple of layers up are
+# perfectly fine, and treating them all as a hard risk crowded the search
+# into worse compromises elsewhere far more often than it prevented a real
+# failure. Raised to 0.7 (in from the 0.75-1.1m the three anecdotes
+# actually failed at, rather than tuned to fit them exactly) restores a
+# clean non-regression (13.40 -> 13.45, zero regressions, one real gain)
+# while presumably keeping less of the protection those anecdotes
+# motivated this for -- deliberately conservative given how easily the
+# lower threshold went net-negative, over chasing the original 3 cases
+# exactly.
+SUPPORT_SEAM_HEIGHT_MIN = 0.7
+SUPPORT_SEAM_TOLERANCE = CONTACT_TOLERANCE
+
 # Large, roughly-equal penalties for the three ways a candidate can plausibly
 # get this whole episode terminated (blocked entry path, unsupported/tipping
 # perch, forced sideways detour through the chamfered corner). The base score
@@ -252,6 +291,39 @@ def _shadowed_clear_floor(state: ContainerState, fw: int, fh: int, n0: int, n1: 
     return col_cumsum[fw:fw + n0] - col_cumsum[0:n0]  # shape (n0, n1)
 
 
+def _support_seam_count(state: ContainerState, fw: int, fh: int, top: np.ndarray) -> np.ndarray:
+    """For every (ix, iy) window (shape matches `top`), how many distinct
+    already-placed items' real top faces sit within SUPPORT_SEAM_TOLERANCE
+    of that window's own landing height `top` and overlap its XY footprint
+    -- see SUPPORT_SEAM_HEIGHT_MIN above. 0 or 1 means resting on the bare
+    floor or a single item; >= 2 means the box would bridge a seam between
+    separately-settled items that only coincidentally share a height."""
+    n0, n1 = top.shape
+    if not state.item_aabbs:
+        return np.zeros((n0, n1), dtype=np.int64)
+    los = np.asarray([item[0] for item in state.item_aabbs])
+    his = np.asarray([item[1] for item in state.item_aabbs])
+    x_center = state.x_min + (np.arange(n0) + fw / 2.0) * state.cell_w
+    y_center = state.y_min + (np.arange(n1) + fh / 2.0) * state.cell_h
+    hx = fw * state.cell_w / 2.0
+    hy = fh * state.cell_h / 2.0
+
+    ax0 = (x_center - hx)[:, None, None]
+    ax1 = (x_center + hx)[:, None, None]
+    ay0 = (y_center - hy)[None, :, None]
+    ay1 = (y_center + hy)[None, :, None]
+    top3 = top[:, :, None]
+
+    overlap_x = (his[None, None, :, 0] > ax0) & (los[None, None, :, 0] < ax1)
+    overlap_y = (his[None, None, :, 1] > ay0) & (los[None, None, :, 1] < ay1)
+    at_height = (
+        (his[None, None, :, 2] >= top3 - SUPPORT_SEAM_TOLERANCE)
+        & (his[None, None, :, 2] <= top3 + SUPPORT_SEAM_TOLERANCE)
+    )
+    contributing = overlap_x & overlap_y & at_height
+    return contributing.sum(axis=2)
+
+
 def _exact_aabb_clear(state: ContainerState, x_center: float, y_center: float,
                        footprint_x: float, footprint_y: float, z0: float, z1: float) -> bool:
     """True iff the box [x_center +/- footprint_x/2, y_center +/- footprint_y/2,
@@ -368,7 +440,19 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     )
     aspect_ok = aspect_ratio <= required_aspect_ratio
 
-    stable = (support_fraction >= required_support) & (core_support_fraction >= required_core) & aspect_ok
+    # See SUPPORT_SEAM_HEIGHT_MIN above: a heightmap-perfect landing can
+    # still bridge a seam between two separately-settled items that happen
+    # to share a height. Only checked high enough up that several items
+    # merely abutting on the floor doesn't count.
+    seam_risk = np.zeros(top.shape, dtype=bool)
+    if (top >= SUPPORT_SEAM_HEIGHT_MIN).any():
+        seam_count = _support_seam_count(state, fw, fh, top)
+        seam_risk = (top >= SUPPORT_SEAM_HEIGHT_MIN) & (seam_count >= 2)
+
+    stable = (
+        (support_fraction >= required_support) & (core_support_fraction >= required_core)
+        & aspect_ok & ~seam_risk
+    )
     in_corner_keepout = _windows(state.corner_keepout, fw, fh).any(axis=(2, 3))
 
     # How much still-clear floor, in this item's own X-columns, would this

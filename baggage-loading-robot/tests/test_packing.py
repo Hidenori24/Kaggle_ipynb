@@ -208,6 +208,85 @@ def test_stability_check_accepts_a_short_wide_box_with_perfect_support():
     assert not result["unstable"]
 
 
+def test_best_position_flags_a_seam_between_two_items_at_the_same_height():
+    # Two separate real items, side by side, that happen to share the
+    # exact same recorded top height (routine when identical items land
+    # at the same layer) -- support_fraction/core/flat all read perfect,
+    # but the box would actually bridge the seam between two
+    # independently-settled bodies rather than resting on one. Force a
+    # single X window spanning the whole grid (footprint_x == the full
+    # container width) so the search has no way to avoid straddling it.
+    from gh_baggage_core.packing import SUPPORT_SEAM_HEIGHT_MIN
+
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=12)
+    footprint_x = (state.x_max - state.x_min) - 1e-6
+    seam_top = state.floor_z + SUPPORT_SEAM_HEIGHT_MIN + 0.1
+    state.height_grid[:, :] = seam_top
+    mid_x = (state.x_min + state.x_max) / 2.0
+    state.item_aabbs.append((
+        (state.x_min - 1.0, state.y_min - 1.0, seam_top - 0.2),
+        (mid_x, state.y_max + 1.0, seam_top),
+    ))
+    state.item_aabbs.append((
+        (mid_x, state.y_min - 1.0, seam_top - 0.2),
+        (state.x_max + 1.0, state.y_max + 1.0, seam_top),
+    ))
+
+    result = best_position(state, footprint_x=footprint_x, footprint_y=0.3, item_height=0.2,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    assert result["support_fraction"] == 1.0
+    assert result["core_support_fraction"] == 1.0
+    assert result["flat"] == 0.0
+    assert result["unstable"]
+
+
+def test_best_position_accepts_a_single_item_at_the_same_height_no_seam():
+    # Same setup, but one real item spans the whole region instead of two
+    # -- the same recorded height as the seam case above, but genuinely a
+    # single rigid support, so it must not trip the new check.
+    from gh_baggage_core.packing import SUPPORT_SEAM_HEIGHT_MIN
+
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=12)
+    footprint_x = (state.x_max - state.x_min) - 1e-6
+    seam_top = state.floor_z + SUPPORT_SEAM_HEIGHT_MIN + 0.1
+    state.height_grid[:, :] = seam_top
+    state.item_aabbs.append((
+        (state.x_min - 1.0, state.y_min - 1.0, seam_top - 0.2),
+        (state.x_max + 1.0, state.y_max + 1.0, seam_top),
+    ))
+
+    result = best_position(state, footprint_x=footprint_x, footprint_y=0.3, item_height=0.2,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    assert result["support_fraction"] == 1.0
+    assert not result["unstable"]
+
+
+def test_best_position_ignores_a_seam_below_the_height_floor():
+    # The same two-item seam as above, but low enough (below
+    # SUPPORT_SEAM_HEIGHT_MIN) that it must be treated as ordinary items
+    # abutting on the floor, not a stacking risk.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=12)
+    footprint_x = (state.x_max - state.x_min) - 1e-6
+    seam_top = state.floor_z + 0.05
+    state.height_grid[:, :] = seam_top
+    mid_x = (state.x_min + state.x_max) / 2.0
+    state.item_aabbs.append((
+        (state.x_min - 1.0, state.y_min - 1.0, seam_top - 0.05),
+        (mid_x, state.y_max + 1.0, seam_top),
+    ))
+    state.item_aabbs.append((
+        (mid_x, state.y_min - 1.0, seam_top - 0.05),
+        (state.x_max + 1.0, state.y_max + 1.0, seam_top),
+    ))
+
+    result = best_position(state, footprint_x=footprint_x, footprint_y=0.3, item_height=0.2,
+                            avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    assert not result["unstable"]
+
+
 def test_best_position_rejects_a_candidate_too_close_to_a_real_item_the_heightmap_missed():
     # A phantom real item placed directly into item_aabbs (bypassing
     # _mark_occupied/height_grid entirely) simulates a case the coarse
