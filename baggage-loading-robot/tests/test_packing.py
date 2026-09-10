@@ -1,7 +1,7 @@
 import numpy as np
 
 from gh_baggage_core.container_state import ContainerState
-from gh_baggage_core.packing import CONTACT_TOLERANCE, LANDING_CLEARANCE, best_position
+from gh_baggage_core.packing import CONTACT_TOLERANCE, LANDING_CLEARANCE, _shadowed_clear_floor, best_position
 
 BASE_CONTAINER = {
     "index": 0,
@@ -144,6 +144,32 @@ def test_exact_chamfer_check_still_blocks_the_true_wedge_corner():
     clear_z = np.array([[0.9]])
     assert _chamfer_fits(state, n0=1, n1=1, fw=1, fh=1, z_center=clear_z,
                           hx=0.02, hy=0.02, hz=0.02).all()
+
+
+def test_shadowed_clear_floor_counts_only_still_clear_cells_strictly_behind():
+    # A tiny, fully hand-controlled grid so the counts are easy to verify by
+    # hand: grid_n=6, fw=2, fh=2 -> n0=n1=5. Row/col 0 is the door side.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=6)
+    state.height_grid[:, :] = state.floor_z
+    # Occupy (raise) a couple of cells so they no longer count as "clear".
+    state.height_grid[2, 4] = state.floor_z + 0.5
+    state.height_grid[3, 5] = state.floor_z + 0.5
+
+    shadow = _shadowed_clear_floor(state, fw=2, fh=2, n0=5, n1=5)
+    assert shadow.shape == (5, 5)
+
+    # Window anchored at (ix=2, iy=0) spans x in [2,4), y in [0,2); "behind"
+    # (y >= 2) in those same x-columns is a 2x4 block (rows 2..5), minus the
+    # two occupied cells above -> 8 - 2 = 6 clear cells.
+    assert shadow[2, 0] == 6.0
+
+    # A window anchored right at the back (iy=4, the last possible fh=2
+    # window) has nothing behind it at all.
+    assert (shadow[:, 4] == 0.0).all()
+
+    # A window in x-columns with nothing raised anywhere behind it counts
+    # the full remaining depth.
+    assert shadow[0, 0] == 2 * 4  # fw=2 columns, 4 clear rows behind (y=2..5)
 
 
 def test_best_position_avoids_placement_that_requires_crossing_a_tall_item():

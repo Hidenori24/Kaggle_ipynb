@@ -22,6 +22,26 @@ UNSTABLE_PENALTY = 100.0
 CORNER_KEEPOUT_PENALTY = 60.0
 FOOTPRINT_BONUS_SCALE = 0.001
 
+# cog_score ("重心スコア") rewards the whole load's center of gravity sitting
+# low, weighted by each item's mass -- entirely orthogonal to what the rest
+# of this scoring already optimizes (fill/stability/path-safety don't care
+# which item ends up where, only that *something* lands safely). Each
+# item's own best spot already comes out lowest-first (packing.py's `top`
+# term), so the lever available here is *which* item gets to claim
+# whatever's the best spot available *this step*, before something else
+# grabs it and a heavy item is left to stack higher later: give heavier
+# items a small bonus so they tend to be selected earlier, while the
+# container still has more low floor space to offer.
+#
+# This is a flat per-item nudge, not scaled by the candidate's own height:
+# it must stay far too small to ever flip a real placement-quality
+# difference (a materially lower or safer spot always has to win on its
+# own terms), since those differences guard against ending the whole
+# episode outright (see env.py: any single failed placement terminates
+# it) -- no amount of cog benefit is worth risking that. It only breaks
+# ties between options that are otherwise comparable.
+MASS_PRIORITY_WEIGHT = 0.001
+
 
 def rank_placements(states: list[ContainerState], candidates: list[dict], deadline: float | None = None):
     """Search every (candidate, orientation, container) combination and
@@ -66,7 +86,8 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
                 if result is None:
                     continue
 
-                score = result["top"] + container_penalty
+                mass = float(item.get("mass", 1.0) or 1.0)
+                score = result["top"] + container_penalty - MASS_PRIORITY_WEIGHT * mass
                 if result["conflict"]:
                     score += TOP_CONFLICT_PENALTY
                 if result["path_blocked"]:

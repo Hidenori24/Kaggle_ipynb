@@ -99,6 +99,26 @@ RISK_PENALTY = 5000.0
 # the moment anything is already placed.
 DEEP_BIAS_WEIGHT = 150.0
 
+# Weight on `item_height * shadow_area` (see `_shadowed_clear_floor`): how
+# strongly a placement is discouraged from permanently sealing off clear
+# floor behind it, in its own X-lane, for anything shorter that might need
+# it later. Started at DEEP_BIAS_WEIGHT's own order of magnitude (150), but
+# against the real simulator that was too weak to move a tall/narrow item
+# off an otherwise-cheaper shallow spot -- `top`'s own differences between
+# candidates routinely swamp a 150-scale nudge. Raised until it actually
+# changed the real outcome on a reproduced failure case (see DESIGN.md):
+# a tall stack landing shallow, sealing a lane a later, shorter item needed.
+SHADOW_BLOCK_WEIGHT = 600.0
+
+# How high a cell can already be stacked and still count as "clear" for
+# `_shadowed_clear_floor` -- deliberately more than a hair above the floor
+# (not just literally-untouched cells), since a cell one modest layer deep
+# is still perfectly usable by another short item, and multi-layer lanes
+# are exactly where sealing off deeper space by mistake tends to happen
+# (a tall stack landing shallow in a lane that already has a layer or two
+# behind it).
+SHADOW_LOW_THRESHOLD = 0.3
+
 # Previously-placed items rarely settle perfectly flat (tiny tilts from the
 # physics settle step are normal), so a target that assumes their recorded
 # top height exactly is occasionally a millimeter or two optimistic. A small
@@ -128,6 +148,50 @@ def _path_block_height(state: ContainerState, fw: int, n_iy: int) -> np.ndarray:
     if n_iy > 1:
         path_block[:, 1:n_iy] = block_by_col[:, 0:n_iy - 1]
     return path_block
+
+
+def _shadowed_clear_floor(state: ContainerState, fw: int, fh: int, n0: int, n1: int) -> np.ndarray:
+    """For every (ix, iy) anchor (shape matches `top`: (n0, n1)), how much
+    still-clear floor area, in the *same X-columns*, sits strictly deeper
+    (larger Y) than this window -- i.e. floor space this placement would
+    permanently wall off. `_path_block_height` is this same corridor looked
+    at from the door's side (what blocks *this* item on the way in); this
+    is the mirror view (what *this* item, once tall and sitting shallow,
+    would in turn block for anything arriving later needing the same lane).
+
+    A single X-column can only ever be entered from the door (see
+    `check_transport_path`: items always spawn at the door and travel
+    straight up the Y axis at roughly a fixed X) -- so once something taller
+    than a future item occupies a shallow Y position in that column, every
+    deeper cell behind it in the same column is unusable by anything short
+    enough to need this floor, for the rest of the episode. That's a much
+    longer-lived cost than merely "risky right now" (`in_corner_keepout`,
+    `path_blocked` etc.), so it's scored as its own term rather than folded
+    into those.
+
+    "Still usable" isn't limited to literally-untouched floor: a cell that
+    already carries one modest layer is just as capable of taking another
+    short item on top as bare floor is, so `SHADOW_LOW_THRESHOLD` treats
+    anything below that as fair game rather than only exact-floor-height
+    cells -- otherwise this would only ever catch the very first layer of
+    stacking and miss multi-layer lanes exactly like the one that produced
+    the real collision this was written to address (a tall stack landing
+    shallow, sealing off a deeper lane at a *second* layer's height).
+    """
+    n = state.grid_n
+    still_clear = state.height_grid <= (state.floor_z + SHADOW_LOW_THRESHOLD)
+    # suffix_count[x, y] = number of still-clear cells at row >= y in column x.
+    suffix_count = np.cumsum(still_clear[:, ::-1], axis=1).astype(np.float64)[:, ::-1]
+    padded = np.concatenate([suffix_count, np.zeros((n, 1))], axis=1)  # index n -> 0
+
+    # Row strictly behind window-row `iy` (0-based anchor of a size-fh
+    # window) is `iy + fh`.
+    behind_rows = np.arange(n1) + fh  # shape (n1,), values in [fh, n]
+    behind_by_col = padded[:, behind_rows]  # shape (n, n1)
+
+    # Sum over the fw columns this footprint actually occupies.
+    col_cumsum = np.concatenate([np.zeros((1, n1)), np.cumsum(behind_by_col, axis=0)], axis=0)
+    return col_cumsum[fw:fw + n0] - col_cumsum[0:n0]  # shape (n0, n1)
 
 
 def _chamfer_fits(state: ContainerState, n0: int, n1: int, fw: int, fh: int,
@@ -212,6 +276,15 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     stable = (support_fraction >= required_support) & (core_support_fraction >= required_core)
     in_corner_keepout = _windows(state.corner_keepout, fw, fh).any(axis=(2, 3))
 
+    # How much still-clear floor, in this item's own X-columns, would this
+    # placement permanently wall off (see `_shadowed_clear_floor`): every
+    # X-column is only ever entered from the door, so a tall item sitting
+    # shallow (small Y) makes everything behind it in that column
+    # unreachable by anything shorter for the rest of the episode, even
+    # though nothing about *this* placement looks risky on its own (it's
+    # not a `path_blocked`/`unstable` call -- it's a future one).
+    shadow_area = _shadowed_clear_floor(state, fw, fh, top.shape[0], top.shape[1]) * (state.cell_w * state.cell_h)
+
     # `fits_ceiling` is a genuine hard constraint (there is no way to make an
     # over-height placement valid). Everything else is a strong-but-soft
     # penalty: we always want *a* candidate back, even if every option on
@@ -248,6 +321,7 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     ix_grid, iy_grid = np.meshgrid(np.arange(top.shape[0]), np.arange(top.shape[1]), indexing="ij")
     deep_bias = -(iy_grid / n_iy) * DEEP_BIAS_WEIGHT
     score = top * 1000.0 + flat * flat_weight + deep_bias + ix_grid * 1e-4
+    score = score + item_height * shadow_area * SHADOW_BLOCK_WEIGHT
     score = score + (~path_clear) * RISK_PENALTY
     score = score + (~stable) * RISK_PENALTY
     score = score + in_corner_keepout * RISK_PENALTY
@@ -265,6 +339,7 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
         "z": z_center,
         "top": float(top[ix, iy]),
         "flat": float(flat[ix, iy]),
+        "shadow_area": float(shadow_area[ix, iy]),
         "support_fraction": float(support_fraction[ix, iy]),
         "core_support_fraction": float(core_support_fraction[ix, iy]),
         "conflict": bool(conflict[ix, iy]),
