@@ -399,6 +399,25 @@ displacement）の根本原因が繰り返し同じパターン——**flatと�
 追加の安全網であり、本番の隠しテストケースを完全に代表するものではない
 点には注意。
 
+現在の提出コード（26.08点提出と同一）でこのベンチマーク一式（6シナリオ）
+を実行した結果を、今後の変更比較用のベースラインとして記録する:
+
+| シナリオ | fill_score | 配置率 | 打ち切り要因 |
+| --- | --- | --- | --- |
+| dense_small_container_stress | 8.88 | 0.37 | is_valid (搬入経路) |
+| shelf_container_mixed_items | 12.89 | 0.67 | is_valid (搬入経路) |
+| single_container_offline_small_items | 6.62 | 0.54 | is_placed_safe (定着転倒) |
+| single_container_online_large_items | 11.10 | 0.40 | is_valid (搬入経路) |
+| two_containers_one_prioritized | 10.29 | 0.82 | is_valid (搬入経路) |
+| two_containers_online_heavy_soft | 10.32 | 0.76 | is_placed_safe (定着転倒) |
+| **平均** | **10.02** | -- | -- |
+
+6シナリオ全てで、内包判定(`is_included`)には一度も失敗していない（面取り
+コーナーの厳密判定などがきちんと効いている）。打ち切り要因は搬入経路
+衝突と定着転倒がおよそ半々で、`sample_config.json`の2タスクだけを見て
+いたときの傾向（後半で定着転倒が増える）と概ね一致する。今後この
+ベースラインより明確に悪化するシナリオが出た変更は要注意。
+
 ## 既知の制約・今後の改善余地
 
 - **「安全な選択肢が皆無」な飽和状態自体は未解決**: 上記の通り、単純な
