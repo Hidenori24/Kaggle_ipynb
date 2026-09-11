@@ -22,25 +22,14 @@ physics-settled state doesn't matter: the online policy still independently
 recomputes actual placements against the live observation every step. Only
 the resulting *order* this function returns is used.
 
-Once that first construction finishes, whatever's left of the 150s budget
-goes into two more passes, both graded against the exact same fixed-order
-score the construction itself trusts (`_total_order_cost` -- O(n), since
-each item only ever competes against itself, not every other remaining
-one, unlike choosing an order in the first place):
-
-- GRASP-style restarts (`plan_order`'s own loop): try a few more greedy
-  constructions from a reshuffled item_list -- `largest_first_order`'s
-  sort is stable, so ties (routine with many identical/near-identical
-  items) break differently each time, sometimes finding a genuinely
-  better path. Keep whichever complete order scores lowest.
-- Construct-then-refine (`_local_search_improve`): 2-opt-style local
-  search on top of that best order -- try swapping two items' positions,
-  keep the swap only if it's a real, measured improvement.
-
-Both are safe by construction: every candidate is independently verified
-against the same ground truth the greedy construction already trusts, so
-neither can be fooled the way directly re-tuning the lookahead itself
-was (see DESIGN.md) -- a worse candidate is simply never chosen.
+Once that construction finishes, whatever's left of the 150s budget goes
+into a second pass: classic construct-then-refine, `_local_search_improve`
+tries swapping pairs of items in the constructed order and keeps a swap
+only when replaying the *whole* order with it (`_total_order_cost`) is a
+real, measured improvement. Evaluating one fixed order this way is far
+cheaper than choosing one (each item only competes against itself, not
+every other remaining item), which is what leaves room for this second
+pass at all within the same budget the construction already uses.
 """
 from __future__ import annotations
 
@@ -69,22 +58,6 @@ LOOKAHEAD_BRANCH = 2
 LOOKAHEAD_STEPS = 1
 
 
-# GRASP-style restarts (Greedy Randomized Adaptive Search Procedure): the
-# same "construct, then verify-and-improve" safety the local search above
-# relies on also lets us safely try *several* greedy constructions instead
-# of committing to the first one, since each candidate's real quality is
-# independently measured (_total_order_cost) rather than trusted on faith
-# -- the failure mode that sank both direct lookahead-tuning attempts (see
-# DESIGN.md) simply can't happen here: a worse restart is just never
-# chosen. Diversity comes from reshuffling item_list before construction:
-# `largest_first_order`'s sort is stable, so ties (routine in scenarios
-# with many identical/near-identical items -- exactly the scenarios the
-# lookahead investigation found the construction most fragile on) break
-# differently on each shuffle, which can lead an otherwise-identical
-# greedy search down a genuinely different, sometimes-better path.
-MAX_RESTARTS = 4
-
-
 def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] | None:
     """Return a full permutation of every item's index, or None if planning
     isn't possible at all (caller should fall back to a simpler heuristic)."""
@@ -92,39 +65,6 @@ def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] |
         return None
 
     deadline = time.perf_counter() + TIME_BUDGET_SECONDS
-
-    best_order = _construct_order(container_list, item_list, deadline)
-
-    # _total_order_cost's own O(n) pass isn't free -- only worth paying for
-    # a baseline to compare against when a restart might actually happen
-    # (there's both budget left and restarts configured at all; see
-    # MAX_RESTARTS). With nothing to compare against, skip straight to
-    # local search exactly as if restarts didn't exist.
-    if MAX_RESTARTS > 0 and time.perf_counter() < deadline:
-        best_cost = _total_order_cost(container_list, _items_in_order(item_list, best_order), deadline)
-        rng = random.Random(0)
-        for _ in range(MAX_RESTARTS):
-            if time.perf_counter() > deadline:
-                break
-            shuffled = list(item_list)
-            rng.shuffle(shuffled)
-            candidate_order = _construct_order(container_list, shuffled, deadline)
-            candidate_cost = _total_order_cost(container_list, _items_in_order(item_list, candidate_order), deadline)
-            if candidate_cost < best_cost:
-                best_cost = candidate_cost
-                best_order = candidate_order
-
-    return _local_search_improve(container_list, item_list, best_order, deadline)
-
-
-def _construct_order(container_list: list[dict], item_list: list[dict], deadline: float) -> list[int]:
-    """The greedy best-fit dry run itself: repeatedly pick, from every item
-    not yet placed, the best (item, orientation, container, position)
-    combination (selection.choose_placement's own logic, via
-    rank_placements/pick_with_lookahead), and record that item's index.
-    `item_list`'s own order only matters as a tie-break (see MAX_RESTARTS
-    above) -- `largest_first_order` re-sorts by volume regardless.
-    """
     states = [ContainerState(c) for c in container_list]
     remaining = list(item_list)
     order: list[int] = []
@@ -165,17 +105,13 @@ def _construct_order(container_list: list[dict], item_list: list[dict], deadline
             dh=dh,
         )
 
+    order = _local_search_improve(container_list, item_list, order, deadline)
     return order
 
 
 def _fallback_ordered(items: list[dict]) -> list[dict]:
     order = largest_first_order(items)
     return [items[i] for i in order]
-
-
-def _items_in_order(item_list: list[dict], order: list[int]) -> list[dict]:
-    index_to_item = {item["index"]: item for item in item_list}
-    return [index_to_item[idx] for idx in order]
 
 
 # A dead end partway through a fixed order costs vastly more than any
@@ -252,7 +188,8 @@ def _local_search_improve(container_list: list[dict], item_list: list[dict],
     if n < 2 or deadline is None:
         return order
 
-    ordered_items = _items_in_order(item_list, order)
+    index_to_item = {item["index"]: item for item in item_list}
+    ordered_items = [index_to_item[idx] for idx in order]
     best_cost = _total_order_cost(container_list, ordered_items, deadline)
 
     rng = random.Random(0)
