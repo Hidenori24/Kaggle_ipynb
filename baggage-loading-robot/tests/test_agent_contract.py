@@ -122,6 +122,7 @@ def test_full_mock_episode_places_every_item_without_crashing(monkeypatch):
     # claim intact (construction itself is untouched) while keeping this
     # test fast.
     monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(offline_planner_module, "MAX_RESTARTS", 0)
     containers = [MockContainer(index=0)]
     items = [
         make_item(i, length=0.5 + 0.05 * (i % 3), width=0.35, height=0.22,
