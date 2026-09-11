@@ -20,6 +20,7 @@ baggage-loading-robot/
 │       ├── ordering.py
 │       └── policy.py
 ├── tests/                      : pybullet不要のロジック単体テスト・契約テスト
+├── dev/                        : 実機シミュレータ向けのローカル回帰ベンチマーク（下記参照）
 └── docs/
     └── DESIGN.md                : アルゴリズム設計メモ
 ```
@@ -50,6 +51,39 @@ python -m pytest tests/ -q
 ルーティングされることなどを検証する。ただし物理的な妥当性（搬入経路の
 干渉、配置後の安定性など）までは検証できないため、提出前には必ず公式
 シミュレータ (`scripts/run_test.py`) で実行確認すること。
+
+## 実機シミュレータでのローカル回帰ベンチマーク
+
+配布キットの `configs/sample_config.json` にはタスクが2つ（`000`/`001`）しか
+入っておらず、これだけでは実際のSIGNATE評価基盤にある「コンテナ数・
+サイズ・荷物構成の異なる多数の隠しテストケース」を代表できない
+（実際、`docs/DESIGN.md`に記録の通り、ローカルの2ケースでは無害に見えた
+変更が実提出でスコアを大きく下げたことがある）。この2ケースだけで
+「変更が安全そうだ」と判断するのは危険なので、`dev/`に、より多様な
+条件（複数コンテナ、優先コンテナ、棚あり、優先/ソフト貨物混在、
+荷物サイズの偏りなど）を機械的に生成するスクリプトを用意している。
+
+```bash
+# 1. 配布キットの configs/ 以下にベンチマーク用configを生成
+python baggage-loading-robot/dev/gen_benchmark_configs.py --out-dir /path/to/simulator/configs/bench
+
+# 2. 配布キットのルートから、各configを実機シミュレータで実行
+cd /path/to/simulator
+for f in configs/bench/*.json; do
+  name=$(basename "$f" .json)
+  python -m scripts.run_test --module-path agents/submit/ --config-path "$f" \
+      --result-dir results/ --result-fname "bench_${name}.json"
+done
+
+# 3. 結果を一覧表示（fill_score・配置率・打ち切り理由を要約）
+python /path/to/baggage-loading-robot/dev/summarize_bench_results.py --result-dir results/ --prefix bench_
+```
+
+コードのスコアリングロジックを変更したときは、`sample_config.json`の2
+タスクだけでなく、このベンチマーク一式でも退行がないことを確認してから
+提出することを推奨する（それでも本番の隠しテストケースを完全には
+代表できない点に注意 -- あくまで「明らかな退行」を検出するための
+追加の安全網）。
 
 ## 提出用zipの作成
 
