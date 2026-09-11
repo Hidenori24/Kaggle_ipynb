@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from agent import Agent  # noqa: E402
 from gh_baggage_core.geometry import oriented_dims  # noqa: E402
+import gh_baggage_core.offline_planner as offline_planner_module  # noqa: E402
 
 
 def make_item(index, length, width, height, mass=5.0, is_prioritized=False, is_soft=False):
@@ -112,7 +113,15 @@ class MockEnv:
         return len(self.pool) == 0
 
 
-def test_full_mock_episode_places_every_item_without_crashing():
+def test_full_mock_episode_places_every_item_without_crashing(monkeypatch):
+    # The offline planner's construct-then-refine local search (see
+    # offline_planner._local_search_improve) is designed to spend whatever's
+    # left of the real 150s TIME_BUDGET_SECONDS -- appropriate for the
+    # actual evaluation harness, not for a test whose only claim is "every
+    # item gets placed without crashing." Bounding attempts keeps that
+    # claim intact (construction itself is untouched) while keeping this
+    # test fast.
+    monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", 1)
     containers = [MockContainer(index=0)]
     items = [
         make_item(i, length=0.5 + 0.05 * (i % 3), width=0.35, height=0.22,
