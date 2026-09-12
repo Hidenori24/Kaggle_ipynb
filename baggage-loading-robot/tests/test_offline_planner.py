@@ -1,10 +1,12 @@
+import random
 import time
 
 import pytest
 
 import gh_baggage_core.offline_planner as offline_planner_module
 from gh_baggage_core.offline_planner import (
-    ORDER_FAILURE_PENALTY, _local_search_improve, _total_order_cost, plan_order,
+    ORDER_FAILURE_PENALTY, _local_search_improve, _total_order_cost, _total_order_cost_detailed,
+    _weighted_index, plan_order,
 )
 
 # The local-search refinement pass added after construction (see
@@ -130,3 +132,76 @@ def test_local_search_improve_leaves_an_already_good_order_alone(monkeypatch):
         [dict(BASE_CONTAINER)], items, order=[0, 1], deadline=time.perf_counter() + 5.0,
     )
     assert order == [0, 1]
+
+
+def test_total_order_cost_detailed_returns_each_items_own_score(monkeypatch):
+    items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
+
+    def fake_rank_placements(states, candidates, deadline):
+        score = 0.1 if candidates[0]["index"] == 0 else 0.2
+        return [(score, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    total, per_item = _total_order_cost_detailed([dict(BASE_CONTAINER)], items, deadline=float("inf"))
+    assert total == pytest.approx(0.3)
+    assert per_item == pytest.approx([0.1, 0.2])
+
+
+def test_total_order_cost_detailed_attributes_dead_end_penalty_to_the_failing_item(monkeypatch):
+    # Mirrors test_total_order_cost_penalizes_a_dead_end_by_items_left_unplaced,
+    # but checking the per-item breakdown _local_search_improve's guided
+    # swap selection relies on: the failing item (index 1) should absorb
+    # the whole tail penalty, and item 2 -- which never got a turn, since
+    # the episode is already over by then -- has no real signal to give
+    # yet and should read 0 rather than some share of the penalty.
+    items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2), make_item(2, 0.4, 0.3, 0.2)]
+
+    def fake_rank_placements(states, candidates, deadline):
+        if candidates[0]["index"] == 1:
+            return []
+        return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    total, per_item = _total_order_cost_detailed([dict(BASE_CONTAINER)], items, deadline=float("inf"))
+    assert total == pytest.approx(0.05 + ORDER_FAILURE_PENALTY * 2)
+    assert per_item[0] == pytest.approx(0.05)
+    assert per_item[1] == pytest.approx(ORDER_FAILURE_PENALTY * 2)
+    assert per_item[2] == 0.0
+
+
+def test_weighted_index_favors_higher_weight_entries():
+    rng = random.Random(42)
+    weights = [1.0, 1.0, 100.0, 1.0]
+    counts = [0, 0, 0, 0]
+    for _ in range(500):
+        counts[_weighted_index(rng, weights)] += 1
+    assert counts[2] > sum(counts) * 0.8
+
+
+def test_weighted_index_falls_back_to_uniform_when_every_weight_is_zero():
+    rng = random.Random(0)
+    idx = _weighted_index(rng, [0.0, 0.0, 0.0])
+    assert 0 <= idx < 3
+
+
+def test_local_search_improve_guided_swap_fixes_a_dead_end_the_worst_item_causes(monkeypatch):
+    # A 6-item order where only item 3 is the problem (it only fits as the
+    # very *first* item placed -- everywhere else hits a dead end); guided
+    # swap selection should notice it's the worst-scoring item in the very
+    # first replay and, weighted toward trying it, find the fix well
+    # inside an attempts budget far smaller than plan_order's real
+    # LOCAL_SEARCH_MAX_ATTEMPTS.
+    items = [make_item(i, 0.4, 0.3, 0.2) for i in range(6)]
+
+    def fake_rank_placements(states, candidates, deadline):
+        already_placed = len(states[0].item_aabbs) > 0
+        if candidates[0]["index"] == 3 and already_placed:
+            return []
+        return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", 30)
+    order = _local_search_improve(
+        [dict(BASE_CONTAINER)], items, order=[0, 3, 1, 2, 4, 5], deadline=time.perf_counter() + 30.0,
+    )
+    assert order[0] == 3

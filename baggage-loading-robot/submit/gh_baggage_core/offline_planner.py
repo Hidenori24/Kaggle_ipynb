@@ -30,6 +30,20 @@ real, measured improvement. Evaluating one fixed order this way is far
 cheaper than choosing one (each item only competes against itself, not
 every other remaining item), which is what leaves room for this second
 pass at all within the same budget the construction already uses.
+
+Which pairs get tried isn't uniform-random: `_total_order_cost_detailed`
+also returns each item's own contribution to the total, and half the time
+`_local_search_improve` swaps the *worst*-scoring item (weighted-random,
+so it isn't always the single worst) against a random partner instead of
+picking both ends uniformly at random. Concentrating attempts on whichever
+item is actually costing the most should reach a good swap in fewer
+attempts than blind random pairing over what can be an 80-item order --
+worth doing on its own merits, and it also matters for how reliably this
+whole pass can be benchmarked at all: it always stops at the same 150s
+wall-clock deadline, so how many attempts it completes (and therefore how
+much it can improve on the construction) depends on the evaluation host's
+raw speed, not just on the code -- fewer attempts needed to find the same
+improvement makes the result that much less sensitive to that.
 """
 from __future__ import annotations
 
@@ -145,18 +159,42 @@ def _total_order_cost(container_list: list[dict], ordered_items: list[dict], dea
     pass over an already-built order affordable within the same time
     budget the construction itself used.
     """
+    total, _per_item = _total_order_cost_detailed(container_list, ordered_items, deadline)
+    return total
+
+
+def _total_order_cost_detailed(container_list: list[dict], ordered_items: list[dict],
+                                deadline: float | None) -> tuple[float, list[float]]:
+    """Same replay as `_total_order_cost`, but also returns each item's own
+    contribution to the total (same length/order as `ordered_items`) -- see
+    `_local_search_improve`'s guided swap selection, which uses this to
+    target attempts at whichever item is currently costing the most rather
+    than picking both swap indices uniformly at random. On a dead end, the
+    failing item absorbs the whole tail penalty and every item after it
+    (never actually evaluated) gets 0 -- they're due to change position
+    anyway once the actual failure gets fixed, so there's no real per-item
+    signal to give them yet.
+    """
     states = [ContainerState(c) for c in container_list]
+    per_item: list[float] = []
     total = 0.0
     for i, item in enumerate(ordered_items):
         if deadline is not None and time.perf_counter() > deadline:
-            total += ORDER_FAILURE_PENALTY * (len(ordered_items) - i)
-            return total
+            remaining = len(ordered_items) - i
+            total += ORDER_FAILURE_PENALTY * remaining
+            per_item.append(ORDER_FAILURE_PENALTY * remaining)
+            per_item.extend([0.0] * (remaining - 1))
+            return total, per_item
         ranked = rank_placements(states, [item], deadline)
         if not ranked:
-            total += ORDER_FAILURE_PENALTY * (len(ordered_items) - i)
-            return total
+            remaining = len(ordered_items) - i
+            total += ORDER_FAILURE_PENALTY * remaining
+            per_item.append(ORDER_FAILURE_PENALTY * remaining)
+            per_item.extend([0.0] * (remaining - 1))
+            return total, per_item
         score, _candidate_idx, c_idx, _orn_idx, result, (dl, dw, dh) = ranked[0]
         total += score
+        per_item.append(score)
         top_z = result["z"] + dh / 2.0
         states[c_idx].place_virtual(
             result["x"], result["y"], dl, dw, top_z,
@@ -164,7 +202,38 @@ def _total_order_cost(container_list: list[dict], ordered_items: list[dict], dea
             is_prioritized=bool(item.get("is_prioritized", False)),
             dh=dh,
         )
-    return total
+    return total, per_item
+
+
+# How often a swap attempt targets the current worst-scoring item
+# (weighted-random, see _weighted_index) rather than picking both indices
+# uniformly at random. Kept at half rather than always-guided: the
+# per-item cost from replaying the *current* order is only ever a
+# snapshot -- once a few swaps land, the item that was worst a moment ago
+# may not be any more, and the ordinary random half keeps exploring
+# pairings a purely greedy "always fix the worst" strategy could get
+# stuck ignoring (two items that are only a problem *together*, say).
+GUIDED_SWAP_PROBABILITY = 0.5
+
+
+def _weighted_index(rng: random.Random, weights: list[float]) -> int:
+    """A random index into `weights`, biased toward larger entries --
+    plain `random.choices` would do this directly, but its per-call
+    cumulative-sum setup is wasted work here since `_local_search_improve`
+    already has one weight list it reuses across many picks per outer
+    attempt (see its own call sites). Falls back to uniform if every
+    weight is non-positive (shouldn't happen -- see the +1.0 floor where
+    this is called -- but a real fallback costs nothing to keep)."""
+    total = sum(weights)
+    if total <= 0:
+        return rng.randrange(len(weights))
+    target = rng.uniform(0.0, total)
+    cumulative = 0.0
+    for idx, w in enumerate(weights):
+        cumulative += w
+        if target <= cumulative:
+            return idx
+    return len(weights) - 1
 
 
 def _local_search_improve(container_list: list[dict], item_list: list[dict],
@@ -183,6 +252,12 @@ def _local_search_improve(container_list: list[dict], item_list: list[dict],
     this can't be fooled by an unreliable estimator: the full replay it
     checks against is the exact same ground truth the construction itself
     already trusts, not a fresh heuristic guessing at it.
+
+    See GUIDED_SWAP_PROBABILITY above for how the two swap indices are
+    actually chosen -- the guided half only changes which pairs get
+    *tried*, never which ones get *kept* (still exactly the same verified
+    total-cost comparison either way), so it can't make this any less safe
+    than uniformly random pairing already was.
     """
     n = len(order)
     if n < 2 or deadline is None:
@@ -190,17 +265,26 @@ def _local_search_improve(container_list: list[dict], item_list: list[dict],
 
     index_to_item = {item["index"]: item for item in item_list}
     ordered_items = [index_to_item[idx] for idx in order]
-    best_cost = _total_order_cost(container_list, ordered_items, deadline)
+    best_cost, per_item_cost = _total_order_cost_detailed(container_list, ordered_items, deadline)
 
     rng = random.Random(0)
     attempts = 0
     while attempts < LOCAL_SEARCH_MAX_ATTEMPTS and time.perf_counter() < deadline:
         attempts += 1
-        i, j = rng.sample(range(n), 2)
+        if rng.random() < GUIDED_SWAP_PROBABILITY:
+            weights = [max(c, 0.0) + 1.0 for c in per_item_cost]
+            i = _weighted_index(rng, weights)
+            j = rng.randrange(n - 1)
+            if j >= i:
+                j += 1
+        else:
+            i, j = rng.sample(range(n), 2)
+
         ordered_items[i], ordered_items[j] = ordered_items[j], ordered_items[i]
-        new_cost = _total_order_cost(container_list, ordered_items, deadline)
+        new_cost, new_per_item = _total_order_cost_detailed(container_list, ordered_items, deadline)
         if new_cost < best_cost:
             best_cost = new_cost
+            per_item_cost = new_per_item
         else:
             ordered_items[i], ordered_items[j] = ordered_items[j], ordered_items[i]
 
