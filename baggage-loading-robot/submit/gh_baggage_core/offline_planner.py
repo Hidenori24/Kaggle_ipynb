@@ -17,24 +17,6 @@ proper greedy best-fit construction with full information, instead of a
 sort followed by a policy that can only ever act on whichever single item
 the plan hands it next.
 
-That search runs in shelf-style batches, not over the whole remaining
-pool at once: items are grouped into descending-height bands (classic
-Next-Fit-Decreasing-Height shelf packing -- see _shelf_batches), and each
-band is fully placed, using the exact same global search/safety machinery
-as before, before the next (shorter) band is even considered. Two earlier,
-different attempts at "layer awareness" are recorded in DESIGN.md as
-rejected: giving each layer its own independent ContainerState lost the
-shared path-blocking/lookahead machinery entirely, and a hard cap on
-landing height fought the existing anti-lane-blocking bias directly. This
-avoids both -- the ContainerState stays single and global, lookahead
-still sees a full band of real alternatives, and nothing about *where* an
-item can land is restricted at all; only the *order* items compete in is
-grouped. If a band's own items ever have nowhere left to go, every
-not-yet-placed item (including future bands) becomes eligible for that
-one step rather than forcing a dead end purely from the grouping -- the
-grouping can only ever narrow the choice, never cause a failure the
-ungrouped search wouldn't also have hit.
-
 Small drift between this dry run's assumed coordinates and the real
 physics-settled state doesn't matter: the online policy still independently
 recomputes actual placements against the live observation every step. Only
@@ -89,53 +71,6 @@ TIME_BUDGET_SECONDS = 150.0
 LOOKAHEAD_BRANCH = 2
 LOOKAHEAD_STEPS = 1
 
-# Classic Next-Fit-Decreasing-Height shelf packing starts a new shelf once
-# an item is short enough that stacking it against the current shelf's own
-# leading (tallest) item would waste too much of that shelf's height.
-# 0.7 means a new band starts once an item's own height-proxy drops below
-# 70% of the band's leading item -- narrow enough that a band is a
-# genuinely similar-height group (the whole point), wide enough that
-# ordinary size variation within one real layer of stock doesn't fragment
-# into a new band for every few percent of height difference.
-SHELF_HEIGHT_DROP_RATIO = 0.7
-
-
-def _item_height_proxy(item: dict) -> float:
-    """The height an item most likely settles at: laid on its largest
-    face (minimizing both footprint waste and tip-over risk -- see
-    packing.ASPECT_RATIO_BASE_LIMIT, which already steers best_position's
-    own orientation choice the same way) puts its *smallest* dimension
-    upright. Only used to group items into shelf bands (see
-    _shelf_batches) -- the actual orientation used is still whatever
-    best_position's full search picks for real, so this only needs to be
-    a reasonable proxy, not an exact prediction.
-    """
-    return min(item["length"], item["width"], item["height"])
-
-
-def _shelf_batches(item_list: list[dict]) -> list[list[int]]:
-    """Group item *indices* into descending-height shelf bands (see
-    SHELF_HEIGHT_DROP_RATIO). Returns a list of index lists, tallest band
-    first; every item appears in exactly one band.
-    """
-    ordered = sorted(item_list, key=_item_height_proxy, reverse=True)
-    batches: list[list[int]] = []
-    current: list[int] = []
-    leading_height = None
-    for item in ordered:
-        h = _item_height_proxy(item)
-        if leading_height is None or h >= leading_height * SHELF_HEIGHT_DROP_RATIO:
-            current.append(item["index"])
-            if leading_height is None:
-                leading_height = h
-        else:
-            batches.append(current)
-            current = [item["index"]]
-            leading_height = h
-    if current:
-        batches.append(current)
-    return batches
-
 
 def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] | None:
     """Return a full permutation of every item's index, or None if planning
@@ -145,75 +80,42 @@ def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] |
 
     deadline = time.perf_counter() + TIME_BUDGET_SECONDS
     states = [ContainerState(c) for c in container_list]
-    index_to_item = {item["index"]: item for item in item_list}
-    batches = [list(batch) for batch in _shelf_batches(item_list)]
+    remaining = list(item_list)
     order: list[int] = []
-    total_remaining = len(item_list)
-    batch_idx = 0
 
-    while total_remaining > 0:
+    while remaining:
         if time.perf_counter() > deadline:
-            # Out of planning time: append whatever's left (across every
-            # not-yet-exhausted band) in the simple largest-first heuristic
-            # order rather than leaving it out.
-            leftover_indices = [idx for batch in batches[batch_idx:] for idx in batch]
-            leftover = [index_to_item[idx] for idx in leftover_indices]
-            order.extend(item["index"] for item in _fallback_ordered(leftover))
+            # Out of planning time: append whatever's left in the simple
+            # largest-first heuristic order rather than leaving it out.
+            order.extend(item["index"] for item in _fallback_ordered(remaining))
             return order
 
-        while batch_idx < len(batches) and not batches[batch_idx]:
-            batch_idx += 1
-
-        current_pool = batches[batch_idx]
-        candidate_order = largest_first_order([index_to_item[idx] for idx in current_pool])
-        candidates = [index_to_item[current_pool[i]] for i in candidate_order]
+        candidate_order = largest_first_order(remaining)
+        candidates = [remaining[i] for i in candidate_order]
         ranked = rank_placements(states, candidates, deadline)
 
         if not ranked:
-            # Nothing left in the current shelf band fits anywhere -- the
-            # safety valve: open up every item in every later band too,
-            # rather than forcing a dead end purely from the grouping (see
-            # this module's own docstring).
-            pool_indices = [idx for batch in batches[batch_idx:] for idx in batch]
-            pool_items = [index_to_item[idx] for idx in pool_indices]
-            candidate_order = largest_first_order(pool_items)
-            candidates = [pool_items[i] for i in candidate_order]
-            ranked = rank_placements(states, candidates, deadline)
-            if not ranked:
-                # Truly nothing fits anywhere any more (both containers
-                # effectively full): nothing we could plan for the rest
-                # would be trustworthy either, so just hand back what's left.
-                order.extend(item["index"] for item in _fallback_ordered(pool_items))
-                return order
-            best = pick_with_lookahead(
-                states, candidates, ranked, deadline,
-                branch=LOOKAHEAD_BRANCH, steps=LOOKAHEAD_STEPS,
-            )
-            _, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh) = best
-            chosen_index = candidate_order[candidate_idx]
-            chosen_item = pool_items[chosen_index]
-            for batch in batches[batch_idx:]:
-                if chosen_item["index"] in batch:
-                    batch.remove(chosen_item["index"])
-                    break
-        else:
-            best = pick_with_lookahead(
-                states, candidates, ranked, deadline,
-                branch=LOOKAHEAD_BRANCH, steps=LOOKAHEAD_STEPS,
-            )
-            _, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh) = best
-            chosen_index = candidate_order[candidate_idx]
-            chosen_item = index_to_item[current_pool[chosen_index]]
-            current_pool.remove(chosen_item["index"])
+            # Nothing fits anywhere in either container any more (both
+            # effectively full): nothing we could plan for the rest would
+            # be trustworthy either, so just hand back what's left.
+            order.extend(item["index"] for item in _fallback_ordered(remaining))
+            return order
 
-        order.append(chosen_item["index"])
-        total_remaining -= 1
+        best = pick_with_lookahead(
+            states, candidates, ranked, deadline,
+            branch=LOOKAHEAD_BRANCH, steps=LOOKAHEAD_STEPS,
+        )
+
+        _, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh) = best
+        remaining_idx = candidate_order[candidate_idx]
+        item = remaining.pop(remaining_idx)
+        order.append(item["index"])
 
         top_z = result["z"] + dh / 2.0
         states[c_idx].place_virtual(
             result["x"], result["y"], dl, dw, top_z,
-            is_soft=bool(chosen_item.get("is_soft", False)),
-            is_prioritized=bool(chosen_item.get("is_prioritized", False)),
+            is_soft=bool(item.get("is_soft", False)),
+            is_prioritized=bool(item.get("is_prioritized", False)),
             dh=dh,
         )
 

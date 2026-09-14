@@ -5,8 +5,8 @@ import pytest
 
 import gh_baggage_core.offline_planner as offline_planner_module
 from gh_baggage_core.offline_planner import (
-    ORDER_FAILURE_PENALTY, _local_search_improve, _shelf_batches, _total_order_cost,
-    _total_order_cost_detailed, _weighted_index, plan_order,
+    ORDER_FAILURE_PENALTY, _local_search_improve, _total_order_cost, _total_order_cost_detailed,
+    _weighted_index, plan_order,
 )
 
 # The local-search refinement pass added after construction (see
@@ -241,67 +241,3 @@ def test_local_search_improve_or_opt_relocates_an_item_a_single_swap_cannot_fix(
         [dict(BASE_CONTAINER)], items, order=[0, 1, 2, 3], deadline=time.perf_counter() + 30.0,
     )
     assert order == [3, 0, 1, 2]
-
-
-def test_shelf_batches_groups_similar_heights_and_covers_every_item():
-    items = [
-        make_item(0, 1.0, 1.0, 1.0),
-        make_item(1, 1.0, 1.0, 1.0),
-        make_item(2, 0.1, 0.1, 0.1),
-        make_item(3, 0.1, 0.1, 0.1),
-    ]
-    batches = _shelf_batches(items)
-    assert sum(len(b) for b in batches) == 4
-    assert sorted(idx for b in batches for idx in b) == [0, 1, 2, 3]
-    tall_batch = next(b for b in batches if 0 in b)
-    assert set(tall_batch) == {0, 1}
-    assert 2 not in tall_batch and 3 not in tall_batch
-
-
-def test_plan_order_processes_taller_shelf_band_before_a_shorter_one(monkeypatch):
-    # Item 2 always looks like the globally best choice by raw score, but
-    # it's short enough to land in a later shelf band than items 0/1 --
-    # the band grouping should still place both tall items first, despite
-    # item 2's better score, since it's simply not eligible yet.
-    items = [
-        make_item(0, 1.0, 1.0, 1.0),
-        make_item(1, 1.0, 1.0, 1.0),
-        make_item(2, 0.1, 0.1, 0.1),
-    ]
-
-    def fake_rank_placements(states, candidates, deadline):
-        results = []
-        for i, item in enumerate(candidates):
-            score = 0.01 if item["index"] == 2 else 0.5
-            results.append((score, i, 0, 0, fake_result(), (0.4, 0.3, 0.2)))
-        return sorted(results, key=lambda e: e[0])
-
-    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
-    monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", 1)
-    order = plan_order([dict(BASE_CONTAINER)], items)
-    assert sorted(order) == [0, 1, 2]
-    assert order.index(2) > order.index(0)
-    assert order.index(2) > order.index(1)
-
-
-def test_plan_order_safety_valve_opens_later_bands_when_current_band_is_stuck(monkeypatch):
-    # Item 0 (alone, the only member of the tall band) never fits by
-    # itself -- without the safety valve this would be a dead end despite
-    # item 2 (a later, shorter band) being genuinely placeable, and despite
-    # item 0 itself being placeable once considered *together* with item 2.
-    items = [make_item(0, 1.0, 1.0, 1.0), make_item(2, 0.1, 0.1, 0.1)]
-    valve_engaged = []
-
-    def fake_rank_placements(states, candidates, deadline):
-        if len(candidates) == 1 and candidates[0]["index"] == 0:
-            return []
-        valve_engaged.append(len(candidates))
-        return [(0.05, i, 0, 0, fake_result(), (0.4, 0.3, 0.2)) for i, item in enumerate(candidates)]
-
-    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
-    monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", 1)
-    order = plan_order([dict(BASE_CONTAINER)], items)
-    assert sorted(order) == [0, 2]
-    # The valve actually ran with both bands pooled together (not just the
-    # stuck single-item band, and not the crude largest-first fallback).
-    assert 2 in valve_engaged
