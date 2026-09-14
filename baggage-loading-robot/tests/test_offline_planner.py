@@ -205,3 +205,39 @@ def test_local_search_improve_guided_swap_fixes_a_dead_end_the_worst_item_causes
         [dict(BASE_CONTAINER)], items, order=[0, 3, 1, 2, 4, 5], deadline=time.perf_counter() + 30.0,
     )
     assert order[0] == 3
+
+
+def test_local_search_improve_or_opt_relocates_an_item_a_single_swap_cannot_fix(monkeypatch):
+    # Only one order is ever valid here: item 3 must go first, and items
+    # 0/1/2 must keep their exact relative order among themselves. Moving
+    # item 3 from the back to the front via a single *swap* would trade
+    # places with whatever sits at the front, disrupting the 0/1/2 order
+    # in the process -- only a relocation (pull 3 out, reinsert at the
+    # front, shifting everyone else down by one without reordering them)
+    # reaches the valid permutation in a single move.
+    items = [make_item(i, 0.4, 0.3, 0.2) for i in range(4)]
+    placement_log = []
+
+    def fake_rank_placements(states, candidates, deadline):
+        already_placed = len(states[0].item_aabbs)
+        if already_placed == 0:
+            placement_log.clear()
+        idx = candidates[0]["index"]
+        if idx == 3 and already_placed > 0:
+            return []
+        if idx != 3 and already_placed == 0:
+            return []
+        if idx in (0, 1, 2):
+            seen_012 = [x for x in placement_log if x in (0, 1, 2)]
+            if idx != len(seen_012):
+                return []
+        placement_log.append(idx)
+        return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", 50)
+    monkeypatch.setattr(offline_planner_module, "OR_OPT_MOVE_PROBABILITY", 1.0)
+    order = _local_search_improve(
+        [dict(BASE_CONTAINER)], items, order=[0, 1, 2, 3], deadline=time.perf_counter() + 30.0,
+    )
+    assert order == [3, 0, 1, 2]

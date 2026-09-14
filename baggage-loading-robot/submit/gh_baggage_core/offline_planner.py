@@ -236,28 +236,46 @@ def _weighted_index(rng: random.Random, weights: list[float]) -> int:
     return len(weights) - 1
 
 
+# Fraction of attempts that try an Or-opt move (pull one item out and
+# reinsert it elsewhere, shifting everything between the two positions)
+# instead of a 2-opt swap. A swap can only ever fix a problem that two
+# *specific* items solve by trading places; relocating one item lets it
+# find a better spot anywhere in the order without needing a reciprocal
+# partner to trade with -- the classic complement to 2-opt in the TSP/
+# scheduling literature (usually called Or-opt), and a strict superset of
+# what a swap of two adjacent items can do. Kept as a minority of
+# attempts, not a replacement: swaps stay cheap and are already proven
+# (see DESIGN.md's local-search adoption), so this only adds a second move
+# shape to try, it doesn't take attempts away from the first.
+OR_OPT_MOVE_PROBABILITY = 0.3
+
+
 def _local_search_improve(container_list: list[dict], item_list: list[dict],
                            order: list[int], deadline: float | None) -> list[int]:
     """Classic construct-then-refine: `plan_order`'s own greedy dry run is
-    the construction, this is the refinement -- a 2-opt-style local search
-    (try swapping two items' positions in the sequence; keep the swap only
-    if replaying the *whole* order with it is a real, measured improvement
-    over not swapping, exactly `_total_order_cost` above) over whatever
-    time budget the construction didn't use. Never returns anything worse
-    than the order it was handed: every kept swap is independently
-    verified to lower the same score construction already optimizes for,
-    so unlike deepening the lookahead itself (tried and rejected -- see
-    DESIGN.md, where a "more informed" deeper look turned out to be a
-    *less* reliable signal than the shallow one it was meant to correct),
-    this can't be fooled by an unreliable estimator: the full replay it
-    checks against is the exact same ground truth the construction itself
-    already trusts, not a fresh heuristic guessing at it.
+    the construction, this is the refinement -- try small changes to the
+    constructed order and keep one only if replaying the *whole* order
+    with it is a real, measured improvement over not making it, exactly
+    `_total_order_cost` above) over whatever time budget the construction
+    didn't use. Never returns anything worse than the order it was handed:
+    every kept move is independently verified to lower the same score
+    construction already optimizes for, so unlike deepening the lookahead
+    itself (tried and rejected -- see DESIGN.md, where a "more informed"
+    deeper look turned out to be a *less* reliable signal than the shallow
+    one it was meant to correct), this can't be fooled by an unreliable
+    estimator: the full replay it checks against is the exact same ground
+    truth the construction itself already trusts, not a fresh heuristic
+    guessing at it.
 
-    See GUIDED_SWAP_PROBABILITY above for how the two swap indices are
-    actually chosen -- the guided half only changes which pairs get
-    *tried*, never which ones get *kept* (still exactly the same verified
-    total-cost comparison either way), so it can't make this any less safe
-    than uniformly random pairing already was.
+    Two move shapes are tried (see OR_OPT_MOVE_PROBABILITY above for the
+    split): a 2-opt-style swap of two items' positions, or an Or-opt-style
+    relocation of one item to a different position in the sequence. See
+    GUIDED_SWAP_PROBABILITY above for how the "which item" half of either
+    move is actually chosen -- guided selection only changes which moves
+    get *tried*, never which ones get *kept* (still exactly the same
+    verified total-cost comparison either way), so neither move shape nor
+    guided selection can make this any less safe than uniformly random
+    swaps alone already were.
     """
     n = len(order)
     if n < 2 or deadline is None:
@@ -271,21 +289,37 @@ def _local_search_improve(container_list: list[dict], item_list: list[dict],
     attempts = 0
     while attempts < LOCAL_SEARCH_MAX_ATTEMPTS and time.perf_counter() < deadline:
         attempts += 1
-        if rng.random() < GUIDED_SWAP_PROBABILITY:
-            weights = [max(c, 0.0) + 1.0 for c in per_item_cost]
-            i = _weighted_index(rng, weights)
+
+        def pick_index() -> int:
+            if rng.random() < GUIDED_SWAP_PROBABILITY:
+                weights = [max(c, 0.0) + 1.0 for c in per_item_cost]
+                return _weighted_index(rng, weights)
+            return rng.randrange(n)
+
+        if rng.random() < OR_OPT_MOVE_PROBABILITY:
+            i = pick_index()
+            j = rng.randrange(n)
+            item = ordered_items.pop(i)
+            ordered_items.insert(j, item)
+            new_cost, new_per_item = _total_order_cost_detailed(container_list, ordered_items, deadline)
+            if new_cost < best_cost:
+                best_cost = new_cost
+                per_item_cost = new_per_item
+            else:
+                ordered_items.pop(j)
+                ordered_items.insert(i, item)
+        else:
+            i = pick_index()
             j = rng.randrange(n - 1)
             if j >= i:
                 j += 1
-        else:
-            i, j = rng.sample(range(n), 2)
 
-        ordered_items[i], ordered_items[j] = ordered_items[j], ordered_items[i]
-        new_cost, new_per_item = _total_order_cost_detailed(container_list, ordered_items, deadline)
-        if new_cost < best_cost:
-            best_cost = new_cost
-            per_item_cost = new_per_item
-        else:
             ordered_items[i], ordered_items[j] = ordered_items[j], ordered_items[i]
+            new_cost, new_per_item = _total_order_cost_detailed(container_list, ordered_items, deadline)
+            if new_cost < best_cost:
+                best_cost = new_cost
+                per_item_cost = new_per_item
+            else:
+                ordered_items[i], ordered_items[j] = ordered_items[j], ordered_items[i]
 
     return [item["index"] for item in ordered_items]
