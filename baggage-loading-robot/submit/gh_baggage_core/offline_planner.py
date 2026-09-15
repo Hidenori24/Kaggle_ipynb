@@ -146,6 +146,30 @@ ORDER_FAILURE_PENALTY = 100000.0
 LOCAL_SEARCH_MAX_ATTEMPTS = 2000
 
 
+# Small weight added, only inside this file's own cost evaluation, for
+# each item's mass-weighted center height (mass * its own vertical
+# center once placed) -- a local proxy for the "load center of gravity"
+# the real evaluator also scores (see DESIGN.md's cog_score notes), on
+# top of the height/risk score selection.rank_placements already
+# computes for placement itself. Deliberately scoped to *only* this
+# replay, never to rank_placements/selection.py: those are shared with
+# both plan_order's own greedy construction and the online policy, and
+# every one of this session's ten prior attempts to lean on cog_score
+# from construction or placement scoring caused real-simulator
+# regressions (see DESIGN.md) -- construction still runs exactly the
+# unmodified height/risk-only search it always has, so this can only
+# ever act as a tie-break between orderings `_local_search_improve`
+# already considers equally good by the existing height/risk signal,
+# the same way GUIDED_SWAP_PROBABILITY only changes which moves get
+# *tried*, never lets a worse height/risk outcome through. Sized well
+# below a typical item's own height contribution (same reasoning as
+# SA_INITIAL_TEMPERATURE above, and the same order of magnitude as
+# selection.py's existing MASS_PRIORITY_WEIGHT) so it can only ever
+# nudge between orderings that are already close, not override the
+# primary signal that's actually been validated to matter for fill.
+COG_TIEBREAK_WEIGHT = 0.001
+
+
 def _total_order_cost(container_list: list[dict], ordered_items: list[dict], deadline: float | None) -> float:
     """The same per-item score `plan_order`'s own construction already
     computes (landing height plus the same path/stability/priority risk
@@ -174,6 +198,9 @@ def _total_order_cost_detailed(container_list: list[dict], ordered_items: list[d
     (never actually evaluated) gets 0 -- they're due to change position
     anyway once the actual failure gets fixed, so there's no real per-item
     signal to give them yet.
+
+    Each item's own placement score also gets a small mass-weighted
+    center-height term added on top -- see COG_TIEBREAK_WEIGHT above.
     """
     states = [ContainerState(c) for c in container_list]
     per_item: list[float] = []
@@ -193,9 +220,11 @@ def _total_order_cost_detailed(container_list: list[dict], ordered_items: list[d
             per_item.extend([0.0] * (remaining - 1))
             return total, per_item
         score, _candidate_idx, c_idx, _orn_idx, result, (dl, dw, dh) = ranked[0]
+        top_z = result["z"] + dh / 2.0
+        mass = float(item.get("mass", 1.0) or 1.0)
+        score += COG_TIEBREAK_WEIGHT * mass * top_z
         total += score
         per_item.append(score)
-        top_z = result["z"] + dh / 2.0
         states[c_idx].place_virtual(
             result["x"], result["y"], dl, dw, top_z,
             is_soft=bool(item.get("is_soft", False)),

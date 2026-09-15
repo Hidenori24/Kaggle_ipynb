@@ -20,9 +20,9 @@ from gh_baggage_core.offline_planner import (
 FAST_LOCAL_SEARCH_MAX_ATTEMPTS = 1
 
 
-def make_item(index, length, width, height, is_prioritized=False, is_soft=False):
+def make_item(index, length, width, height, is_prioritized=False, is_soft=False, mass=5.0):
     return {
-        "index": index, "length": length, "width": width, "height": height, "mass": 5.0,
+        "index": index, "length": length, "width": width, "height": height, "mass": mass,
         "is_prioritized": is_prioritized, "is_soft": is_soft,
         "belongs_to": None, "pos": None, "orn": None,
     }
@@ -74,7 +74,10 @@ def test_total_order_cost_sums_each_items_own_score(monkeypatch):
     # (see test_plan_order_returns_a_full_valid_permutation's own slowness)
     # -- _total_order_cost's job is just to replay a fixed order and sum
     # scores/apply place_virtual, which this isolates from the (expensive)
-    # real placement search.
+    # real placement search. Each item also picks up a small mass-weighted
+    # cog tie-break term on top of its own score (see COG_TIEBREAK_WEIGHT):
+    # mass=5.0 (make_item's default) and fake_result's z=0.1 with dh=0.2
+    # give a center height of 0.2, so +0.001 per item.
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
 
     def fake_rank_placements(states, candidates, deadline):
@@ -83,7 +86,7 @@ def test_total_order_cost_sums_each_items_own_score(monkeypatch):
 
     monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
     cost = _total_order_cost([dict(BASE_CONTAINER)], items, deadline=float("inf"))
-    assert cost == pytest.approx(0.3)
+    assert cost == pytest.approx(0.3 + 2 * 0.001)
 
 
 def test_total_order_cost_penalizes_a_dead_end_by_items_left_unplaced(monkeypatch):
@@ -134,7 +137,34 @@ def test_local_search_improve_leaves_an_already_good_order_alone(monkeypatch):
     assert order == [0, 1]
 
 
+def test_local_search_improve_prefers_the_heavier_item_lower_when_height_risk_is_tied(monkeypatch):
+    # Item 0 is heavy (mass=10), item 1 is light (mass=1); both score a
+    # flat 0.1 from rank_placements regardless of which item it is or
+    # where it lands -- only the landing height (0.1 for whichever item
+    # goes first, 0.5 for whichever goes second) differs by position, not
+    # identity. That ties the existing height/risk signal between the two
+    # possible orders, leaving only the cog tie-break term (see
+    # COG_TIEBREAK_WEIGHT) -- mass times landing height -- to prefer
+    # putting the heavy item in the lower spot. Starting from [1, 0]
+    # (heavy item last, the worse arrangement), local search should swap
+    # to [0, 1].
+    items = [make_item(0, 0.4, 0.3, 0.2, mass=10.0), make_item(1, 0.4, 0.3, 0.2, mass=1.0)]
+
+    def fake_rank_placements(states, candidates, deadline):
+        pos = len(states[0].item_aabbs)
+        z = 0.1 if pos == 0 else 0.5
+        return [(0.1, 0, 0, 0, fake_result(z=z), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    order = _local_search_improve(
+        [dict(BASE_CONTAINER)], items, order=[1, 0], deadline=time.perf_counter() + 5.0,
+    )
+    assert order == [0, 1]
+
+
 def test_total_order_cost_detailed_returns_each_items_own_score(monkeypatch):
+    # Each item picks up a +0.001 cog tie-break term on top of its own
+    # score here too -- see the sibling test above for the arithmetic.
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
 
     def fake_rank_placements(states, candidates, deadline):
@@ -143,8 +173,8 @@ def test_total_order_cost_detailed_returns_each_items_own_score(monkeypatch):
 
     monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
     total, per_item = _total_order_cost_detailed([dict(BASE_CONTAINER)], items, deadline=float("inf"))
-    assert total == pytest.approx(0.3)
-    assert per_item == pytest.approx([0.1, 0.2])
+    assert total == pytest.approx(0.3 + 2 * 0.001)
+    assert per_item == pytest.approx([0.1 + 0.001, 0.2 + 0.001])
 
 
 def test_total_order_cost_detailed_attributes_dead_end_penalty_to_the_failing_item(monkeypatch):
@@ -154,6 +184,10 @@ def test_total_order_cost_detailed_attributes_dead_end_penalty_to_the_failing_it
     # the whole tail penalty, and item 2 -- which never got a turn, since
     # the episode is already over by then -- has no real signal to give
     # yet and should read 0 rather than some share of the penalty.
+    # Item 0's own placed score also picks up the +0.001 cog tie-break
+    # term (see the earlier tests' arithmetic); the dead-end penalty
+    # itself carries no placement result to compute one from, so it's
+    # unaffected.
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2), make_item(2, 0.4, 0.3, 0.2)]
 
     def fake_rank_placements(states, candidates, deadline):
@@ -163,8 +197,8 @@ def test_total_order_cost_detailed_attributes_dead_end_penalty_to_the_failing_it
 
     monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
     total, per_item = _total_order_cost_detailed([dict(BASE_CONTAINER)], items, deadline=float("inf"))
-    assert total == pytest.approx(0.05 + ORDER_FAILURE_PENALTY * 2)
-    assert per_item[0] == pytest.approx(0.05)
+    assert total == pytest.approx(0.05 + 0.001 + ORDER_FAILURE_PENALTY * 2)
+    assert per_item[0] == pytest.approx(0.05 + 0.001)
     assert per_item[1] == pytest.approx(ORDER_FAILURE_PENALTY * 2)
     assert per_item[2] == 0.0
 
