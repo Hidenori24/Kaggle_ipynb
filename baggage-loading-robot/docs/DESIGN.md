@@ -1739,3 +1739,24 @@ cog_score関連の変更と同様に撤回する。改善または無変化で�
 実証された。今後cog_score/stability_score/placement_score/soft_item_
 scoreをさらに改善したい場合は、この「局所探索専用のコスト評価に小さな
 タイブレーク項を追加する」パターンを踏襲するのが良い。
+
+## 同じパターンをstability_score向けに横展開（局所探索コストにcore_support_fractionタイブレーク項を追加）
+
+cogタイブレークの実証を受け、同じ設計パターンをstability_score向けにも
+横展開した。`packing.best_position`が既に計算済みの`core_support_
+fraction`（アイテムの*中心*footprintがどれだけ実体の上に乗っているか
+——DESIGN.mdの継ぎ目調査で実際の着地不安定性と最も直結すると判明していた
+指標）を使い、`_total_order_cost_detailed`にのみ
+`STABILITY_TIEBREAK_WEIGHT * (1 - core_support_fraction)`
+（`STABILITY_TIEBREAK_WEIGHT=0.01`）を追加。既に計算済みの値を使うため
+追加コストはゼロ。`rank_placements`/構築フェーズ/オンラインポリシーは
+一切変更していない。
+
+ユニットテストでは、高さ/リスクスコアが完全に同点になるよう設計した
+2アイテムのケース（アイテム0が2番目の位置に来た時だけ支持率0.5、それ
+以外は常に1.0）で、局所探索がアイテム0を1番目に置く順序へ実際にスワップ
+することを確認（全51テストPASS）。
+
+**結果**: 実機PyBulletを使った信頼できる6シナリオ全てで、fill_scoreが
+基準値と完全一致（退行ゼロ、想定通り）。cogタイブレークと同じく、
+実際に効果があったかは実機提出でしか確認できない。

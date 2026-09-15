@@ -61,11 +61,12 @@ def test_plan_order_two_containers_uses_both(monkeypatch):
     assert sorted(order) == list(range(len(items)))
 
 
-def fake_result(z=0.1):
+def fake_result(z=0.1, core_support_fraction=1.0):
     return {
         "x": 0.0, "y": 0.0, "z": z, "top": 0.0, "flat": 0.0,
         "conflict": False, "path_blocked": False, "unstable": False,
         "in_corner_keepout": False, "fw": 4, "fh": 4,
+        "core_support_fraction": core_support_fraction,
     }
 
 
@@ -154,6 +155,30 @@ def test_local_search_improve_prefers_the_heavier_item_lower_when_height_risk_is
         pos = len(states[0].item_aabbs)
         z = 0.1 if pos == 0 else 0.5
         return [(0.1, 0, 0, 0, fake_result(z=z), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    order = _local_search_improve(
+        [dict(BASE_CONTAINER)], items, order=[1, 0], deadline=time.perf_counter() + 5.0,
+    )
+    assert order == [0, 1]
+
+
+def test_local_search_improve_prefers_better_core_support_when_height_risk_is_tied(monkeypatch):
+    # Both items always score a flat 0.1 from rank_placements, tying the
+    # existing height/risk signal regardless of order. Item 0 specifically
+    # only gets poor core support (0.5) when it lands *second*; every
+    # other (item, position) combination gets full support (1.0). That
+    # makes [1, 0] (item 0 second, poor support) strictly worse than
+    # [0, 1] (item 0 first, full support) purely via the stability
+    # tie-break term (see STABILITY_TIEBREAK_WEIGHT) -- local search
+    # should swap from the worse starting order to the better one.
+    items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
+
+    def fake_rank_placements(states, candidates, deadline):
+        idx = candidates[0]["index"]
+        pos = len(states[0].item_aabbs)
+        core = 0.5 if (idx == 0 and pos == 1) else 1.0
+        return [(0.1, 0, 0, 0, fake_result(core_support_fraction=core), (0.4, 0.3, 0.2))]
 
     monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
     order = _local_search_improve(

@@ -169,6 +169,22 @@ LOCAL_SEARCH_MAX_ATTEMPTS = 2000
 # primary signal that's actually been validated to matter for fill.
 COG_TIEBREAK_WEIGHT = 0.001
 
+# Same tie-break pattern as COG_TIEBREAK_WEIGHT just above, this time for
+# stability: `best_position` (see packing.py) already computes
+# `core_support_fraction` -- how much of the item's *central* footprint
+# actually rests on something solid, the signal DESIGN.md's seam-support
+# investigation found most directly tied to real settle-time instability
+# -- for every placement, whether or not anything downstream ever reads
+# it. Adding `1 - core_support_fraction` here (0 for a fully-supported
+# core, up to 1 for none of it) costs nothing new to compute and, exactly
+# like the cog term, can only ever break a tie between orderings
+# `_local_search_improve` already rates equally by height/risk, never let
+# a worse height/risk outcome through -- rank_placements/selection.py and
+# plan_order's construction are untouched. `.get(..., 1.0)` (perfect
+# support) covers any test fixture's mocked result that omits the field
+# entirely, contributing nothing rather than erroring.
+STABILITY_TIEBREAK_WEIGHT = 0.01
+
 
 def _total_order_cost(container_list: list[dict], ordered_items: list[dict], deadline: float | None) -> float:
     """The same per-item score `plan_order`'s own construction already
@@ -199,8 +215,9 @@ def _total_order_cost_detailed(container_list: list[dict], ordered_items: list[d
     anyway once the actual failure gets fixed, so there's no real per-item
     signal to give them yet.
 
-    Each item's own placement score also gets a small mass-weighted
-    center-height term added on top -- see COG_TIEBREAK_WEIGHT above.
+    Each item's own placement score also gets two small tie-break terms
+    added on top -- a mass-weighted center-height term and a core-support
+    term, see COG_TIEBREAK_WEIGHT and STABILITY_TIEBREAK_WEIGHT above.
     """
     states = [ContainerState(c) for c in container_list]
     per_item: list[float] = []
@@ -223,6 +240,7 @@ def _total_order_cost_detailed(container_list: list[dict], ordered_items: list[d
         top_z = result["z"] + dh / 2.0
         mass = float(item.get("mass", 1.0) or 1.0)
         score += COG_TIEBREAK_WEIGHT * mass * top_z
+        score += STABILITY_TIEBREAK_WEIGHT * (1.0 - result.get("core_support_fraction", 1.0))
         total += score
         per_item.append(score)
         states[c_idx].place_virtual(
