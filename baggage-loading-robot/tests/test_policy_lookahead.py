@@ -46,7 +46,7 @@ def test_lookahead_avoids_branch_that_dead_ends_the_rest_of_the_pool(monkeypatch
     # wrong, and what the lookahead exists to catch.
     import gh_baggage_core.selection as selection_module
 
-    def fake_choose_placement(states, sub_candidates, deadline):
+    def fake_choose_placement(states, sub_candidates, deadline, floor_waste=True):
         # `candidates[0]` was placed by cheap_branch; only candidates[1]'s
         # item remains in that continuation.
         remaining_index = sub_candidates[0]["index"]

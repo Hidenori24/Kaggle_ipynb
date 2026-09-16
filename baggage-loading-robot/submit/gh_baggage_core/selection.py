@@ -42,14 +42,56 @@ FOOTPRINT_BONUS_SCALE = 0.001
 # ties between options that are otherwise comparable.
 MASS_PRIORITY_WEIGHT = 0.001
 
+# An item resting directly on the container floor can never contribute to
+# fill_score, no matter how well it's packed.
+#
+# The evaluator (`Evaluator.calculate_fill_rate`) counts an item's volume
+# only when all eight of its corners clear *every* container plane by at
+# least 5mm -- `inclusion_margin` is -0.005, a negative value, so touching
+# a plane (distance 0) already fails -- and it's all-or-nothing: one corner
+# short and the item's entire volume is dropped. One of those planes is the
+# floor, and it sits exactly at the inner floor surface, so an item settled
+# on the floor is at distance 0 there and is always excluded. Measured on
+# the real simulator: of 29 items placed in dense_small_container_stress,
+# the 10 resting on the floor were excluded, all of them, and made up 92%
+# of all excluded volume (see docs/FINDINGS.md).
+#
+# So the bottom layer is a platform, never points. What it costs us is its
+# own volume; what it buys is the floor area it covers so the layers above
+# it can count. Per unit of floor area covered, that cost is exactly the
+# item's height in the orientation it's placed in -- which is why this
+# penalty scales with `dh` rather than with the item's volume: covering the
+# floor with fewer, bigger items is neutral, covering it with *flatter*
+# ones is the actual win, and scaling by `dh` also steers each floor item
+# into its flattest orientation.
+#
+# Deliberately sized to be decisive only *among* floor placements, where
+# every candidate ties on the `top` term (they all rest at floor level) and
+# so nothing else separates them: it stays well under the risk penalties
+# above, which must keep winning outright -- a placement that risks ending
+# the episode is never worth a better bottom layer.
+FLOOR_WASTE_WEIGHT = 1.0
 
-def rank_placements(states: list[ContainerState], candidates: list[dict], deadline: float | None = None):
+
+def rank_placements(states: list[ContainerState], candidates: list[dict], deadline: float | None = None,
+                    floor_waste: bool = True):
     """Search every (candidate, orientation, container) combination and
     return each candidate item's own best placement, sorted best-first.
 
     `candidates` should already be ordered largest-first: under a time
     budget we bail out between candidates, so that ordering determines which
     items got a fair evaluation.
+
+    `floor_waste` applies FLOOR_WASTE_WEIGHT to placements that land on the
+    bare floor. The online policy wants it: it decides where an item
+    actually goes, against the real observed heightmap, where "is this the
+    floor" is an exact test. The offline planner turns it off, because all
+    it produces is an *order* -- its positions are a dry-run prediction the
+    online phase recomputes anyway -- and letting a new term reshape which
+    item gets picked at each construction step perturbs that order
+    chaotically, which measurably regresses the real result (the same
+    failure mode as every other construction-level change tried in this
+    session; see docs/FINDINGS.md and DESIGN.md).
 
     Each entry is (score, candidate_idx, container_idx, orn_idx, result,
     (dl, dw, dh)). Returns [] if nothing fits anywhere for anyone.
@@ -88,6 +130,10 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
 
                 mass = float(item.get("mass", 1.0) or 1.0)
                 score = result["top"] + container_penalty - MASS_PRIORITY_WEIGHT * mass
+                if floor_waste and result["top"] <= state.floor_z + 1e-6:
+                    # Lands on the bare floor: this item's volume is written
+                    # off, so prefer spending the flattest one here.
+                    score += FLOOR_WASTE_WEIGHT * dh
                 if result["conflict"]:
                     score += TOP_CONFLICT_PENALTY
                 if result["path_blocked"]:
@@ -109,10 +155,11 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
     return sorted(per_candidate_best.values(), key=lambda entry: entry[0])
 
 
-def choose_placement(states: list[ContainerState], candidates: list[dict], deadline: float | None = None):
+def choose_placement(states: list[ContainerState], candidates: list[dict], deadline: float | None = None,
+                     floor_waste: bool = True):
     """The single best (candidate, orientation, container, position)
     combination, or None if nothing fits anywhere. See rank_placements."""
-    ranked = rank_placements(states, candidates, deadline)
+    ranked = rank_placements(states, candidates, deadline, floor_waste=floor_waste)
     return ranked[0] if ranked else None
 
 
@@ -127,7 +174,8 @@ DEAD_END_PENALTY = 200.0
 
 
 def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ranked: list[tuple],
-                         deadline: float | None, branch: int, steps: int):
+                         deadline: float | None, branch: int, steps: int,
+                         floor_waste: bool = True):
     """Among the top `branch` first-moves in `ranked`, prefer the one whose
     greedy continuation over the rest of `candidates` (not the future
     stream -- whatever the caller can already see) racks up the least
@@ -163,7 +211,7 @@ def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ra
         while remaining and depth < steps and (deadline is None or time.perf_counter() < deadline):
             sub_order = largest_first_order(remaining)
             sub_candidates = [remaining[i] for i in sub_order]
-            sub_best = choose_placement(cloned_states, sub_candidates, deadline)
+            sub_best = choose_placement(cloned_states, sub_candidates, deadline, floor_waste=floor_waste)
             if sub_best is None:
                 cumulative += DEAD_END_PENALTY
                 break

@@ -92,7 +92,7 @@ def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] |
 
         candidate_order = largest_first_order(remaining)
         candidates = [remaining[i] for i in candidate_order]
-        ranked = rank_placements(states, candidates, deadline)
+        ranked = rank_placements(states, candidates, deadline, floor_waste=False)
 
         if not ranked:
             # Nothing fits anywhere in either container any more (both
@@ -103,7 +103,7 @@ def plan_order(container_list: list[dict], item_list: list[dict]) -> list[int] |
 
         best = pick_with_lookahead(
             states, candidates, ranked, deadline,
-            branch=LOOKAHEAD_BRANCH, steps=LOOKAHEAD_STEPS,
+            branch=LOOKAHEAD_BRANCH, steps=LOOKAHEAD_STEPS, floor_waste=False,
         )
 
         _, candidate_idx, c_idx, orn_idx, result, (dl, dw, dh) = best
@@ -185,7 +185,7 @@ def _total_order_cost_detailed(container_list: list[dict], ordered_items: list[d
             per_item.append(ORDER_FAILURE_PENALTY * remaining)
             per_item.extend([0.0] * (remaining - 1))
             return total, per_item
-        ranked = rank_placements(states, [item], deadline)
+        ranked = rank_placements(states, [item], deadline, floor_waste=False)
         if not ranked:
             remaining = len(ordered_items) - i
             total += ORDER_FAILURE_PENALTY * remaining

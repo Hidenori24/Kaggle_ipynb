@@ -7,8 +7,10 @@ comes out lowest-first, the only lever available at this level is *which*
 item gets to claim a given low spot before something else takes it -- these
 tests exercise exactly that choice.
 """
+import pytest
+
 from gh_baggage_core.container_state import ContainerState
-from gh_baggage_core.selection import rank_placements
+from gh_baggage_core.selection import FLOOR_WASTE_WEIGHT, rank_placements
 
 BASE_CONTAINER = {
     "index": 0, "length": 2.0, "width": 1.5, "height": 1.6, "thickness": 0.04,
@@ -55,3 +57,38 @@ def test_mass_bias_does_not_override_a_genuinely_better_spot():
     assert len(ranked) == 2
     best_candidate_idx = ranked[0][1]
     assert best_candidate_idx == 1  # the light item's candidate_idx (genuinely lower top)
+
+
+def test_flattest_item_is_preferred_for_the_bare_floor():
+    # Nothing resting on the container floor can ever count toward
+    # fill_score (see FLOOR_WASTE_WEIGHT), so the bottom layer should be
+    # spent on whichever item wastes the least volume per unit of floor
+    # area it covers -- that is, the flattest one. Same footprint and same
+    # mass for both, so only height separates them.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    flat = make_item(0, mass=5.0, length=0.4, width=0.4, height=0.1)
+    tall = make_item(1, mass=5.0, length=0.4, width=0.4, height=0.5)
+
+    ranked = rank_placements([state], [flat, tall], deadline=None)
+    assert len(ranked) == 2
+    assert ranked[0][1] == 0  # the flat item's candidate_idx
+
+
+def test_floor_waste_penalty_applies_only_at_floor_level():
+    # The same item, once landing on the bare floor and once landing on a
+    # platform 0.3 higher. The elevated placement will actually count
+    # toward fill_score, so it must not carry the floor penalty: the score
+    # gap between the two should be the 0.3 of extra height *minus* the
+    # penalty the floor placement alone pays.
+    item = make_item(0, mass=5.0, length=0.4, width=0.4, height=0.2)
+
+    on_floor = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    floor_score = rank_placements([on_floor], [item], deadline=None)[0][0]
+
+    raised = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    raised.height_grid[:, :] = raised.floor_z + 0.3
+    raised_score = rank_placements([raised], [item], deadline=None)[0][0]
+
+    # dh is 0.2 -- the flattest orientation of a 0.4 x 0.4 x 0.2 item.
+    expected_gap = 0.3 - FLOOR_WASTE_WEIGHT * 0.2
+    assert raised_score - floor_score == pytest.approx(expected_gap)
