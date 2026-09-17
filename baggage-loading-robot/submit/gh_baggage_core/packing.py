@@ -247,80 +247,6 @@ def _path_block_height(state: ContainerState, fw: int, n_iy: int) -> np.ndarray:
     return path_block
 
 
-# The validator does not actually carry every item straight up its own X
-# column. `check_transport_path` first clamps the entry X:
-#
-#   x_min = -length/2 + thickness + cut_x + half_w + start_margin
-#   rel_x = min(max(rel_target[0], x_min), x_max)
-#
-# so anything whose target X sits deeper than that (past the chamfer, on the
-# -X side) enters at `x_min` instead, travels up Y there, and only then
-# slides *sideways* in X to its target -- an L-shaped path, not a straight
-# one. That sideways leg happens at the transport height with the same
-# `getClosestPoints(distance=safety_margin)` check as the rest, so anything
-# standing in it fails the whole placement, which ends the episode outright
-# (env.step terminates on check_transport_path returning False).
-#
-# `cut_x` is a large fraction of the container -- 0.533m of 2.17m in
-# dense_small_container_stress -- so this covers roughly the deepest third
-# of the X range, not some negligible sliver. Modelling only the straight-up-Y
-# corridor (see _path_block_height) left that whole leg unchecked.
-#
-# Our own x_min already sits 2mm inside the validator's, so the x_max side
-# never needs the clamp: only the -X side does.
-VALIDATOR_START_MARGIN = 0.01
-
-
-def _entry_anchor_x(state: ContainerState) -> int:
-    """First anchor column (inclusive) reachable without a sideways leg.
-
-    The validator's clamp lands the item's *left edge* at
-    `-length/2 + thickness + cut_x + start_margin` regardless of how wide it
-    is (the half-width cancels against the anchor-to-center offset), so this
-    depends only on the container.
-    """
-    # ContainerState pulls its own x_min in by a safety margin on top of the
-    # wall thickness; recover it so the two frames line up.
-    own_margin = state.x_min + state.length / 2.0 - state.thickness
-    offset = state.cut_x + VALIDATOR_START_MARGIN - own_margin
-    return int(math.ceil(max(0.0, offset) / max(state.cell_w, 1e-9)))
-
-
-def _entry_path_block(state: ContainerState, fw: int, fh: int, n0: int, n1: int) -> np.ndarray:
-    """Tallest obstruction along the entry path for every (ix, iy) anchor,
-    following the L-shaped route the validator really uses.
-
-    For anchors at or right of the clamp this is exactly
-    `_path_block_height`'s straight-up-Y corridor. For anchors deeper than
-    the clamp it's the worse of two legs: the Y corridor travelled at the
-    *entry* columns (not the target's own), and the sideways X sweep from
-    there across to the target, taken over the item's own Y rows.
-    """
-    straight = _path_block_height(state, fw, n1)
-    ix_entry = _entry_anchor_x(state)
-    if ix_entry <= 0 or n0 <= 1:
-        return straight
-
-    ix_entry = min(ix_entry, n0 - 1)
-    # Y leg, travelled at the entry columns rather than the target's own.
-    entry_leg = straight[ix_entry][None, :]
-
-    # X leg: per column, the tallest cell across the item's Y rows...
-    row_max = _windows(state.height_grid, 1, fh).max(axis=(2, 3))  # (n, n1)
-    # ...then, for each anchor, the tallest of those between it and the
-    # entry columns' far edge (a suffix max, truncated there).
-    last = min(ix_entry + fw - 1, row_max.shape[0] - 1)
-    limited = row_max[:last + 1]
-    sideways = np.maximum.accumulate(limited[::-1], axis=0)[::-1]
-
-    blocked = straight.copy()
-    reach = min(ix_entry, sideways.shape[0])
-    blocked[:reach] = np.maximum(
-        np.maximum(straight[:reach], sideways[:reach]), entry_leg,
-    )
-    return blocked
-
-
 def _shadowed_clear_floor(state: ContainerState, fw: int, fh: int, n0: int, n1: int) -> np.ndarray:
     """For every (ix, iy) anchor (shape matches `top`: (n0, n1)), how much
     still-clear floor area, in the *same X-columns*, sits strictly deeper
@@ -475,7 +401,7 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     if not fits_ceiling.any():
         return None
 
-    path_block = _entry_path_block(state, fw, fh, top.shape[0], top.shape[1])
+    path_block = _path_block_height(state, fw, top.shape[1])
     path_clear = (path_block + PATH_CLEARANCE) <= landing_bottom
 
     conflict = np.zeros_like(fits_ceiling, dtype=bool)
