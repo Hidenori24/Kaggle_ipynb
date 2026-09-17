@@ -3,7 +3,8 @@ import pytest
 
 from gh_baggage_core.container_state import ContainerState
 from gh_baggage_core.packing import (
-    CONTACT_TOLERANCE, LANDING_CLEARANCE, _shadowed_clear_floor, best_effort_position, best_position,
+    CONTACT_TOLERANCE, LANDING_CLEARANCE, _entry_anchor_x, _entry_path_block, _path_block_height,
+    _shadowed_clear_floor, best_effort_position, best_position,
 )
 
 BASE_CONTAINER = {
@@ -442,3 +443,47 @@ def test_best_position_avoids_placement_that_requires_crossing_a_tall_item():
     assert not result["path_blocked"]
     # It should have picked an x-column that isn't behind the tall blocker.
     assert not (-0.15 <= result["x"] <= 0.15)
+
+
+def test_entry_path_block_catches_an_obstruction_in_the_sideways_leg():
+    # The validator clamps the entry X to clear the chamfer, so a target
+    # deeper than that comes in at the clamp, travels up Y there, and only
+    # then slides sideways in X to its spot (see _entry_path_block). Here
+    # the straight-up-Y corridor to a deep -X anchor is completely clear,
+    # and so is the Y corridor at the entry columns -- the only thing in the
+    # way is a tall wall standing in the sideways leg. Modelling just the
+    # straight corridor misses it entirely and reports a clean path.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    ix_entry = _entry_anchor_x(state)
+    assert ix_entry > 2, "fixture needs a clamp deep enough to leave anchors behind it"
+    # Start from a uniformly clear floor so the chamfer keepout (which walls
+    # off the deep corner outright) can't mask what this is checking.
+    state.height_grid[:, :] = state.floor_z
+
+    wall_rows = slice(12, 16)
+    state.height_grid[ix_entry - 2:ix_entry + 4, wall_rows] = state.floor_z + 1.0
+
+    fw = fh = 3
+    n0, n1 = state.grid_n - fw + 1, state.grid_n - fh + 1
+    straight = _path_block_height(state, fw, n1)
+    blocked = _entry_path_block(state, fw, fh, n0, n1)
+
+    deep = 0  # an anchor well behind the clamp
+    assert straight[deep, 12] < state.floor_z + 0.5  # straight corridor looks clear
+    assert blocked[deep, 12] >= state.floor_z + 1.0  # sideways leg does not
+
+
+def test_entry_path_block_leaves_anchors_at_or_past_the_clamp_alone():
+    # Anchors the validator can reach without a sideways leg must keep
+    # exactly the straight-up-Y corridor they had before.
+    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    ix_entry = _entry_anchor_x(state)
+    state.height_grid[:, :] = state.floor_z
+    state.height_grid[ix_entry + 2:ix_entry + 5, 4:8] = state.floor_z + 0.6
+
+    fw = fh = 3
+    n0, n1 = state.grid_n - fw + 1, state.grid_n - fh + 1
+    straight = _path_block_height(state, fw, n1)
+    blocked = _entry_path_block(state, fw, fh, n0, n1)
+
+    assert np.array_equal(blocked[ix_entry:], straight[ix_entry:])
