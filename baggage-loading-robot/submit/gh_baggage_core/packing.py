@@ -370,14 +370,9 @@ def _chamfer_fits(state: ContainerState, n0: int, n1: int, fw: int, fh: int,
 
 
 def best_position(state: ContainerState, footprint_x: float, footprint_y: float, item_height: float,
-                   avoid_soft_top: bool, avoid_priority_top: bool,
-                   require_safe: bool = False) -> dict | None:
+                   avoid_soft_top: bool, avoid_priority_top: bool) -> dict | None:
     """Search the grid for the best anchor to place a `footprint_x x footprint_y`
-    x `item_height` box. Returns None if it cannot fit anywhere.
-
-    With `require_safe`, only anchors that clear every episode-ending check
-    (path, stability, corner keepout) are eligible, and None comes back when
-    there are none -- rather than the usual least-bad candidate."""
+    x `item_height` box. Returns None if it cannot fit anywhere."""
     n = state.grid_n
     fw = max(1, int(math.ceil(footprint_x / max(state.cell_w, 1e-6))))
     fh = max(1, int(math.ceil(footprint_y / max(state.cell_h, 1e-6))))
@@ -511,18 +506,6 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     score = score + in_corner_keepout * RISK_PENALTY
     score = score + conflict * 0.5
     score = np.where(fits_ceiling, score, np.inf)
-    if require_safe:
-        # Caller is asking only for placements our own checks consider
-        # outright safe, and would rather be told "nowhere" than handed the
-        # least-bad gamble. Every one of these flags corresponds to a
-        # validator check that terminates the whole episode when it fails
-        # (env.step: check_transport_path -> path_clear, place_item's
-        # settle test -> stable), so once a candidate carries one, placing
-        # it costs every item still in the stream, not just this one. See
-        # policy.Agent._act, which asks for safe placements first and only
-        # falls back to this function's ordinary least-bad answer when no
-        # item in the pool has one anywhere.
-        score = np.where(path_clear & stable & ~in_corner_keepout, score, np.inf)
     ix, iy = np.unravel_index(np.argmin(score), score.shape)
 
     # See EXACT_CHECK_SAFETY_MARGIN above: verify the top candidate against

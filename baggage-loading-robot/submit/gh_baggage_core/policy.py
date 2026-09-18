@@ -68,29 +68,7 @@ class Policy:
         item_order = largest_first_order(pool_list)
         candidates = [pool_list[i] for i in item_order]
 
-        # Any placement our own checks flag as unstable, path-blocked or in
-        # the corner keepout maps onto a validator check that ends the whole
-        # episode when it fails (env.step terminates on check_transport_path
-        # or place_item returning False) -- so taking one costs every item
-        # still in the stream, not just this one.
-        #
-        # Measured on the real simulator: in all four scenarios traced, the
-        # placement that ended the run was already flagged here before we
-        # made it. only_000 went out on an unstable pick (support 0.625,
-        # flat 0.528) that toppled 0.78m; only_001 on a path-blocked pick
-        # made with nine other candidates available; shelf on a pick with
-        # support 0.125 and core support 0.000. We were not blind to any of
-        # them, we just had nothing scoring better and placed them anyway.
-        #
-        # So ask for a genuinely safe placement first, across every item in
-        # the pool. Giving up this item's own spot for a worse-but-safe one
-        # (or, at the extreme, a corner of bare floor that scores nothing at
-        # all) is near-always worth it against losing the rest of the
-        # stream. Only when nothing in the pool has a safe placement
-        # anywhere do we fall back to the old least-bad answer.
-        ranked = rank_placements(states, candidates, deadline, require_safe=True)
-        if not ranked:
-            ranked = rank_placements(states, candidates, deadline)
+        ranked = rank_placements(states, candidates, deadline)
         if not ranked:
             return self._fallback_action(observation)
 
