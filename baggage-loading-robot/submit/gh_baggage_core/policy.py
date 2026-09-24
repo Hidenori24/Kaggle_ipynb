@@ -1,8 +1,9 @@
 """Online (sequential) placement policy.
 
 For every visible pool item x every orientation x every container, we ask
-the heightmap packer (packing.best_position, via selection.rank_placements)
-for its best landing spot per item, then pick among the top few candidates
+the exact-geometry packer (exact_packing.best_position_exact, via
+selection.rank_placements) for its best landing spot per item, then pick
+among the top few candidates
 using a shallow lookahead: for each, simulate a short greedy continuation
 over the *rest of the current pool* (which we can already see -- this isn't
 peeking at the future stream) and prefer whichever first move leaves the
@@ -34,7 +35,7 @@ TIME_BUDGET_SECONDS = 5.5
 
 # How many of the current pool's best first-moves to actually branch on, and
 # how many additional greedy steps to simulate per branch. Kept small: cost
-# is roughly BRANCH * STEPS * pool_size * 12 best_position calls on top of
+# is roughly BRANCH * STEPS * pool_size * 12 best_position_exact calls on top of
 # the base rank_placements pass, and pool_size can be up to ~40, all within
 # a single policy() call's 8-10s budget (unlike the offline planner, which
 # can afford to look much further ahead -- see offline_planner.py).

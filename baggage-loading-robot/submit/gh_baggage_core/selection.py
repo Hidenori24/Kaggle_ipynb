@@ -11,8 +11,8 @@ from __future__ import annotations
 import time
 
 from .container_state import ContainerState
+from .exact_packing import best_position_exact
 from .geometry import NUM_ORIENTATIONS, oriented_dims
-from .packing import best_position
 
 PRIORITY_CONTAINER_VIOLATION_PENALTY = 1000.0
 PRIORITY_CONTAINER_RESERVE_PENALTY = 0.05
@@ -120,7 +120,7 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
                 ):
                     container_penalty += PRIORITY_CONTAINER_RESERVE_PENALTY
 
-                result = best_position(
+                result = best_position_exact(
                     state, dl, dw, dh,
                     avoid_soft_top=not is_soft,
                     avoid_priority_top=not is_prioritized,

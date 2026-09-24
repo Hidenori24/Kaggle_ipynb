@@ -44,14 +44,22 @@ def test_mass_bias_does_not_override_a_genuinely_better_spot():
     # A light item with a strictly better (lower/safer) spot should still
     # win over a heavy item stuck with a worse one -- this is a tie-breaker,
     # not a license to prefer heavy items regardless of placement quality.
-    state = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    state = ContainerState(dict(BASE_CONTAINER))
     # Occupy the floor everywhere except a small island, forcing anything
     # landing outside that island to stack on top of the floor-covering item.
-    state.height_grid[:, :] = state.floor_z + 0.5
-    state.height_grid[0:4, 0:4] = state.floor_z
+    island = 0.15
+    platform_top = state.floor_z + 0.5
+    state.item_aabbs.append((
+        (state.x_min, state.y_min + island, state.floor_z),
+        (state.x_max, state.y_max, platform_top),
+    ))
+    state.item_aabbs.append((
+        (state.x_min + island, state.y_min, state.floor_z),
+        (state.x_max, state.y_min + island, platform_top),
+    ))
 
-    heavy_far = make_item(0, mass=50.0, length=1.0, width=1.0)  # can't use the island (too big)
-    light_near = make_item(1, mass=1.0, length=0.1, width=0.1)  # fits the island easily
+    heavy_far = make_item(0, mass=50.0, length=1.0, width=1.0, height=0.1)  # can't use the island (too big)
+    light_near = make_item(1, mass=1.0, length=0.1, width=0.1, height=0.05)  # fits the island easily, safe aspect ratio
 
     ranked = rank_placements([state], [heavy_far, light_near], deadline=None)
     assert len(ranked) == 2
@@ -82,11 +90,15 @@ def test_floor_waste_penalty_applies_only_at_floor_level():
     # penalty the floor placement alone pays.
     item = make_item(0, mass=5.0, length=0.4, width=0.4, height=0.2)
 
-    on_floor = ContainerState(dict(BASE_CONTAINER), grid_n=24)
+    on_floor = ContainerState(dict(BASE_CONTAINER))
     floor_score = rank_placements([on_floor], [item], deadline=None)[0][0]
 
-    raised = ContainerState(dict(BASE_CONTAINER), grid_n=24)
-    raised.height_grid[:, :] = raised.floor_z + 0.3
+    raised = ContainerState(dict(BASE_CONTAINER))
+    platform_top = raised.floor_z + 0.3
+    raised.item_aabbs.append((
+        (raised.x_min, raised.y_min, raised.floor_z),
+        (raised.x_max, raised.y_max, platform_top),
+    ))
     raised_score = rank_placements([raised], [item], deadline=None)[0][0]
 
     # dh is 0.2 -- the flattest orientation of a 0.4 x 0.4 x 0.2 item.
