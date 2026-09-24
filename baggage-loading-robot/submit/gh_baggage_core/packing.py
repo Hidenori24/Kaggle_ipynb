@@ -370,9 +370,17 @@ def _chamfer_fits(state: ContainerState, n0: int, n1: int, fw: int, fh: int,
 
 
 def best_position(state: ContainerState, footprint_x: float, footprint_y: float, item_height: float,
-                   avoid_soft_top: bool, avoid_priority_top: bool) -> dict | None:
+                   avoid_soft_top: bool, avoid_priority_top: bool,
+                   require_safe: bool = False) -> dict | None:
     """Search the grid for the best anchor to place a `footprint_x x footprint_y`
-    x `item_height` box. Returns None if it cannot fit anywhere."""
+    x `item_height` box. Returns None if it cannot fit anywhere.
+
+    With `require_safe`, only anchors that clear every episode-ending check
+    (path, stability, corner keepout) are eligible, and None comes back when
+    there are none -- rather than the usual least-bad candidate. Meant to be
+    used as a narrow, single-item rescue (see policy.py), not a general
+    substitute for the ordinary search: it says nothing about which item
+    should be placed, only whether the one already chosen has a safer spot."""
     n = state.grid_n
     fw = max(1, int(math.ceil(footprint_x / max(state.cell_w, 1e-6))))
     fh = max(1, int(math.ceil(footprint_y / max(state.cell_h, 1e-6))))
@@ -506,6 +514,17 @@ def best_position(state: ContainerState, footprint_x: float, footprint_y: float,
     score = score + in_corner_keepout * RISK_PENALTY
     score = score + conflict * 0.5
     score = np.where(fits_ceiling, score, np.inf)
+    if require_safe:
+        # Caller already picked which item to place through the ordinary
+        # (risk-tolerant) search and lookahead, and is asking only whether
+        # *this specific item* has a genuinely safe alternative spot --
+        # never to reconsider which item wins the step. Restricting to
+        # candidates clear of path/stability/keepout risk here changes
+        # nothing about item selection, only where the already-chosen item
+        # ends up. See policy.Agent._act, which calls this only for the
+        # single item it already committed to, and only when that item's
+        # first-choice spot was itself flagged risky.
+        score = np.where(path_clear & stable & ~in_corner_keepout, score, np.inf)
     ix, iy = np.unravel_index(np.argmin(score), score.shape)
 
     # See EXACT_CHECK_SAFETY_MARGIN above: verify the top candidate against
