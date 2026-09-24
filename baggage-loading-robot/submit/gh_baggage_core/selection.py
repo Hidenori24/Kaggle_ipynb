@@ -74,7 +74,7 @@ FLOOR_WASTE_WEIGHT = 1.0
 
 
 def rank_placements(states: list[ContainerState], candidates: list[dict], deadline: float | None = None,
-                    floor_waste: bool = True, require_safe: bool = False):
+                    floor_waste: bool = True):
     """Search every (candidate, orientation, container) combination and
     return each candidate item's own best placement, sorted best-first.
 
@@ -92,12 +92,6 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
     chaotically, which measurably regresses the real result (the same
     failure mode as every other construction-level change tried in this
     session; see docs/FINDINGS.md and DESIGN.md).
-
-    `require_safe` restricts every candidate's own search to placements that
-    clear path/stability/keepout risk (see packing.best_position), meant for
-    a narrow single-item rescue rather than the ordinary multi-item
-    competition -- see policy.py, which only ever calls this with a single
-    already-chosen item.
 
     Each entry is (score, candidate_idx, container_idx, orn_idx, result,
     (dl, dw, dh)). Returns [] if nothing fits anywhere for anyone.
@@ -130,7 +124,6 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
                     state, dl, dw, dh,
                     avoid_soft_top=not is_soft,
                     avoid_priority_top=not is_prioritized,
-                    require_safe=require_safe,
                 )
                 if result is None:
                     continue

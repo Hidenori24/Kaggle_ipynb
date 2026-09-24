@@ -81,36 +81,6 @@ class Policy:
             chosen = ranked[0]
 
         _, candidate_idx, c_idx, orn_idx, result, _dims = chosen
-
-        # The ordinary search above already picked *which* item to place --
-        # that choice stands untouched. But if the spot it landed on is
-        # flagged risky, every one of those flags maps onto a validator
-        # check that ends the whole episode when it fails (env.step
-        # terminates on check_transport_path or place_item returning
-        # False), losing every item still in the stream, not just this one.
-        # Traced against the real simulator: in every episode-ending
-        # placement examined, our own checks had already flagged it before
-        # we made it (see docs/NEXT_PLAN.md) -- so it's worth spending a
-        # little of this call's own time budget asking whether *this same
-        # item* has a genuinely safe spot anywhere, before committing to the
-        # risky one.
-        #
-        # This is deliberately narrower than asking the whole pool for a
-        # safe placement (tried and reverted -- see docs/NEXT_PLAN.md
-        # section 7): that broadened which item wins each step's
-        # competition, and the resulting cascade of different items landing
-        # in different places regressed the real score even though no
-        # single placement it chose was ever worse than the one it
-        # replaced. Rescoring only the item already selected changes where
-        # it goes, never who gets to go -- so it can't perturb item
-        # selection order at all, the specific mechanism that broke the
-        # broader version.
-        if (result["unstable"] or result["path_blocked"] or result["in_corner_keepout"]) \
-                and time.perf_counter() < deadline:
-            safe_ranked = rank_placements(states, [candidates[candidate_idx]], deadline, require_safe=True)
-            if safe_ranked:
-                _, _, c_idx, orn_idx, result, _dims = safe_ranked[0]
-
         item_pos_idx = item_order[candidate_idx]
 
         # `place_pos` is the container-relative local coordinate the env
