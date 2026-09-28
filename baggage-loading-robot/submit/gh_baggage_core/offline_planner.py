@@ -158,6 +158,19 @@ def _total_order_cost(container_list: list[dict], ordered_items: list[dict], dea
     first place. That gap is exactly what makes a local-search refinement
     pass over an already-built order affordable within the same time
     budget the construction itself used.
+
+    Unlike the construction's own per-step calls, this turns `floor_waste`
+    ON (see selection.rank_placements): a fixed order has nothing left to
+    perturb -- there's only one candidate per call here, so there's no
+    item-selection competition for a new scoring term to reshape, which is
+    the actual mechanism behind every past regression from changing
+    per-step scoring (see docs/FINDINGS.md). What floor_waste changes here
+    is only how two already-decided orders compare against each other,
+    and a comparison that's blind to "this order dumps a big item on the
+    floor, wasting it entirely" is exactly the mismatch FLOOR_WASTE_WEIGHT
+    exists to fix -- without it, this whole local-search pass has been
+    optimizing a signal that's partly opposed to the real objective the
+    same way the pre-floor_waste greedy score was.
     """
     total, _per_item = _total_order_cost_detailed(container_list, ordered_items, deadline)
     return total
@@ -185,7 +198,7 @@ def _total_order_cost_detailed(container_list: list[dict], ordered_items: list[d
             per_item.append(ORDER_FAILURE_PENALTY * remaining)
             per_item.extend([0.0] * (remaining - 1))
             return total, per_item
-        ranked = rank_placements(states, [item], deadline, floor_waste=False, exact=False)
+        ranked = rank_placements(states, [item], deadline, floor_waste=True, exact=False)
         if not ranked:
             remaining = len(ordered_items) - i
             total += ORDER_FAILURE_PENALTY * remaining
