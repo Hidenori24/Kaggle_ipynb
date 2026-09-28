@@ -30,7 +30,16 @@ def make_item(index, length, width, height, is_prioritized=False, is_soft=False)
 
 BASE_CONTAINER = {
     "index": 0, "length": 2.0, "width": 1.45, "height": 1.61, "thickness": 0.04,
-    "cut_x": 0.44, "cut_y": 0.4, "center": (0.0, 0.0, 0.805), "shelf": False,
+    # cut_x/cut_y left at 0 (unlike a real container's chamfered corner):
+    # several tests here count on item_aabbs starting empty (via a fake
+    # rank_placements that inspects len(states[0].item_aabbs) to tell
+    # "nothing placed yet" from "something placed"), which a real
+    # container's own always-present corner-shelf fixture (see
+    # ContainerState._apply_small_shelf_obstruction) would break by adding
+    # one entry before any item is ever placed. None of these tests are
+    # about chamfer/keepout behavior, so there's nothing lost by leaving it
+    # out here.
+    "cut_x": 0.0, "cut_y": 0.0, "center": (0.0, 0.0, 0.805), "shelf": False,
     "is_prioritized": False, "packed_items": [],
 }
 
@@ -77,7 +86,7 @@ def test_total_order_cost_sums_each_items_own_score(monkeypatch):
     # real placement search.
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         score = 0.1 if candidates[0]["index"] == 0 else 0.2
         return [(score, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
 
@@ -89,7 +98,7 @@ def test_total_order_cost_sums_each_items_own_score(monkeypatch):
 def test_total_order_cost_penalizes_a_dead_end_by_items_left_unplaced(monkeypatch):
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2), make_item(2, 0.4, 0.3, 0.2)]
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         if candidates[0]["index"] == 1:
             return []  # dead end on the second item in this order
         return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
@@ -108,7 +117,7 @@ def test_local_search_improve_swaps_to_avoid_a_dead_end(monkeypatch):
     # find the swap ([1, 0]) that avoids it entirely.
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         already_placed = len(states[0].item_aabbs) > 0
         if candidates[0]["index"] == 1 and already_placed:
             return []
@@ -124,7 +133,7 @@ def test_local_search_improve_swaps_to_avoid_a_dead_end(monkeypatch):
 def test_local_search_improve_leaves_an_already_good_order_alone(monkeypatch):
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
 
     monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
@@ -137,7 +146,7 @@ def test_local_search_improve_leaves_an_already_good_order_alone(monkeypatch):
 def test_total_order_cost_detailed_returns_each_items_own_score(monkeypatch):
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         score = 0.1 if candidates[0]["index"] == 0 else 0.2
         return [(score, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
 
@@ -156,7 +165,7 @@ def test_total_order_cost_detailed_attributes_dead_end_penalty_to_the_failing_it
     # yet and should read 0 rather than some share of the penalty.
     items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2), make_item(2, 0.4, 0.3, 0.2)]
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         if candidates[0]["index"] == 1:
             return []
         return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
@@ -193,7 +202,7 @@ def test_local_search_improve_guided_swap_fixes_a_dead_end_the_worst_item_causes
     # LOCAL_SEARCH_MAX_ATTEMPTS.
     items = [make_item(i, 0.4, 0.3, 0.2) for i in range(6)]
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         already_placed = len(states[0].item_aabbs) > 0
         if candidates[0]["index"] == 3 and already_placed:
             return []
@@ -218,7 +227,7 @@ def test_local_search_improve_or_opt_relocates_an_item_a_single_swap_cannot_fix(
     items = [make_item(i, 0.4, 0.3, 0.2) for i in range(4)]
     placement_log = []
 
-    def fake_rank_placements(states, candidates, deadline, floor_waste=True):
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
         already_placed = len(states[0].item_aabbs)
         if already_placed == 0:
             placement_log.clear()

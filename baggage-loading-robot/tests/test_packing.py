@@ -244,10 +244,15 @@ def test_best_position_flags_a_seam_between_two_items_at_the_same_height():
 def test_best_position_accepts_a_single_item_at_the_same_height_no_seam():
     # Same setup, but one real item spans the whole region instead of two
     # -- the same recorded height as the seam case above, but genuinely a
-    # single rigid support, so it must not trip the new check.
+    # single rigid support, so it must not trip the new check. cut_x=0 here
+    # (unlike BASE_CONTAINER's default) so the real corner-shelf fixture
+    # (see ContainerState._apply_small_shelf_obstruction) -- which happens
+    # to sit within CONTACT_TOLERANCE of this test's seam_top -- doesn't
+    # itself get counted as a second contributor and falsely trip the seam
+    # check this test is specifically checking stays *off*.
     from gh_baggage_core.packing import SUPPORT_SEAM_HEIGHT_MIN
 
-    state = ContainerState(dict(BASE_CONTAINER), grid_n=12)
+    state = ContainerState(dict(BASE_CONTAINER, cut_x=0.0, cut_y=0.0), grid_n=12)
     footprint_x = (state.x_max - state.x_min) - 1e-6
     seam_top = state.floor_z + SUPPORT_SEAM_HEIGHT_MIN + 0.1
     state.height_grid[:, :] = seam_top

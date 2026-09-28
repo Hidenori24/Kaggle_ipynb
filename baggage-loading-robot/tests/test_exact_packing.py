@@ -185,3 +185,58 @@ def test_best_position_exact_require_safe_rejects_unstable_and_blocked_candidate
     # must reject every candidate this unstable rather than accept the
     # only unstable option available.
     assert result is None
+
+
+_STACKED_PLATFORM_TOP = 0.5
+
+
+def _stacked_transit_scenario(obstruction_top: float):
+    # A platform spanning the *entire* rest of the depth (no floor-beyond-it
+    # alternative for the search to fall back on) with an obstruction flush
+    # against its near edge (no floor-before-it gap either): the only two
+    # ways this footprint can land are "on the platform" (this test's
+    # concern) or overlapping the obstruction itself, so `top` is pinned to
+    # the platform regardless of the obstruction's height, isolating
+    # `path_blocked` as the only thing that varies between the two tests
+    # using this helper.
+    container = dict(BASE_CONTAINER, cut_x=0.0, cut_y=0.0)
+    state = ContainerState(container)
+    footprint_x = state.x_max - state.x_min
+    obstruction_hi_y = state.y_min + 0.15
+    state.item_aabbs.append((
+        (state.x_min, obstruction_hi_y, state.floor_z),
+        (state.x_max, state.y_max, _STACKED_PLATFORM_TOP),
+    ))
+    state.item_aabbs.append((
+        (state.x_min, state.y_min, state.floor_z),
+        (state.x_max, obstruction_hi_y, obstruction_top),
+    ))
+    result = best_position_exact(state, footprint_x=footprint_x, footprint_y=0.2, item_height=0.2,
+                                  avoid_soft_top=True, avoid_priority_top=True)
+    assert result is not None
+    assert result["top"] == pytest.approx(_STACKED_PLATFORM_TOP)
+    return result
+
+
+def _stacked_transit_bottom():
+    from gh_baggage_core.exact_packing import TRANSPORT_DROP_HEIGHT
+    return _STACKED_PLATFORM_TOP + LANDING_CLEARANCE + TRANSPORT_DROP_HEIGHT
+
+
+def test_best_position_exact_transit_clears_a_short_obstruction_when_stacked():
+    # The validator's own transport check doesn't slide the item in near
+    # floor height -- for anything not resting flush on the floor/shelf, it
+    # flies at the target's own height plus TRANSPORT_DROP_HEIGHT (0.08m)
+    # until it arrives, then drops the rest of the way (see
+    # check_transport_path / _move_item in the simulator source). An
+    # obstruction shorter than that flying height is genuinely harmless,
+    # even though it's taller than the target's own landing surface.
+    result = _stacked_transit_scenario(obstruction_top=_stacked_transit_bottom() - 0.03)
+    assert not result["path_blocked"]
+
+
+def test_best_position_exact_transit_blocked_by_an_obstruction_in_the_flying_slice():
+    # Same setup, but the corridor obstruction now reaches up into the
+    # transiting item's actual flying height -- must be blocked.
+    result = _stacked_transit_scenario(obstruction_top=_stacked_transit_bottom() + 0.05)
+    assert result["path_blocked"]

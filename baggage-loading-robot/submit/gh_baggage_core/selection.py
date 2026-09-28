@@ -13,6 +13,7 @@ import time
 from .container_state import ContainerState
 from .exact_packing import best_position_exact
 from .geometry import NUM_ORIENTATIONS, oriented_dims
+from .packing import best_position
 
 PRIORITY_CONTAINER_VIOLATION_PENALTY = 1000.0
 PRIORITY_CONTAINER_RESERVE_PENALTY = 0.05
@@ -74,7 +75,7 @@ FLOOR_WASTE_WEIGHT = 1.0
 
 
 def rank_placements(states: list[ContainerState], candidates: list[dict], deadline: float | None = None,
-                    floor_waste: bool = True):
+                    floor_waste: bool = True, exact: bool = True):
     """Search every (candidate, orientation, container) combination and
     return each candidate item's own best placement, sorted best-first.
 
@@ -92,6 +93,21 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
     chaotically, which measurably regresses the real result (the same
     failure mode as every other construction-level change tried in this
     session; see docs/FINDINGS.md and DESIGN.md).
+
+    `exact` picks the search backend: `exact_packing.best_position_exact`
+    (real box geometry, via `ContainerState.item_aabbs`) when True, or the
+    older discretized-heightmap `packing.best_position` when False. Same
+    reasoning as `floor_waste` -- the online policy wants the more precise
+    search for the position it actually commits to, but the offline
+    planner only produces an *order*, and swapping the position-scoring
+    backend used at each construction step reshapes which item wins that
+    step's competition, which is exactly the kind of construction-phase
+    perturbation this session has repeatedly measured as regressing hard on
+    the real evaluator even when every individual step's choice looks
+    reasonable in isolation (see docs/FINDINGS.md and DESIGN.md). The
+    offline planner keeps using the grid search it was tuned and validated
+    against; only the online phase's actual, committed placement uses the
+    exact one.
 
     Each entry is (score, candidate_idx, container_idx, orn_idx, result,
     (dl, dw, dh)). Returns [] if nothing fits anywhere for anyone.
@@ -120,11 +136,18 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
                 ):
                     container_penalty += PRIORITY_CONTAINER_RESERVE_PENALTY
 
-                result = best_position_exact(
-                    state, dl, dw, dh,
-                    avoid_soft_top=not is_soft,
-                    avoid_priority_top=not is_prioritized,
-                )
+                if exact:
+                    result = best_position_exact(
+                        state, dl, dw, dh,
+                        avoid_soft_top=not is_soft,
+                        avoid_priority_top=not is_prioritized,
+                    )
+                else:
+                    result = best_position(
+                        state, dl, dw, dh,
+                        avoid_soft_top=not is_soft,
+                        avoid_priority_top=not is_prioritized,
+                    )
                 if result is None:
                     continue
 
@@ -156,10 +179,10 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
 
 
 def choose_placement(states: list[ContainerState], candidates: list[dict], deadline: float | None = None,
-                     floor_waste: bool = True):
+                     floor_waste: bool = True, exact: bool = True):
     """The single best (candidate, orientation, container, position)
     combination, or None if nothing fits anywhere. See rank_placements."""
-    ranked = rank_placements(states, candidates, deadline, floor_waste=floor_waste)
+    ranked = rank_placements(states, candidates, deadline, floor_waste=floor_waste, exact=exact)
     return ranked[0] if ranked else None
 
 
@@ -175,7 +198,7 @@ DEAD_END_PENALTY = 200.0
 
 def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ranked: list[tuple],
                          deadline: float | None, branch: int, steps: int,
-                         floor_waste: bool = True):
+                         floor_waste: bool = True, exact: bool = True):
     """Among the top `branch` first-moves in `ranked`, prefer the one whose
     greedy continuation over the rest of `candidates` (not the future
     stream -- whatever the caller can already see) racks up the least
@@ -211,7 +234,7 @@ def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ra
         while remaining and depth < steps and (deadline is None or time.perf_counter() < deadline):
             sub_order = largest_first_order(remaining)
             sub_candidates = [remaining[i] for i in sub_order]
-            sub_best = choose_placement(cloned_states, sub_candidates, deadline, floor_waste=floor_waste)
+            sub_best = choose_placement(cloned_states, sub_candidates, deadline, floor_waste=floor_waste, exact=exact)
             if sub_best is None:
                 cumulative += DEAD_END_PENALTY
                 break
