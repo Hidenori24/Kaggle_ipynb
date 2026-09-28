@@ -90,7 +90,6 @@ class ContainerState:
         if self.has_shelf:
             self._apply_shelf_ceiling()
         self._apply_cut_corner_keepout()
-        self._apply_small_shelf_obstruction()
         self._build_from_packed_items(container.get("packed_items", []) or [])
 
     def _find_chamfer_plane(self, n_vecs, points):
@@ -190,56 +189,6 @@ class ContainerState:
             # fall back to the old conservative hard block so we never plan
             # a placement into a corner we can't actually verify.
             self.height_grid[:band_cells, :] = self.ceiling_z
-
-    def _apply_small_shelf_obstruction(self) -> None:
-        """`Container._create_small_shelf` in the simulator source builds a
-        real, solid physical fixture near the cut corner -- a thin plate
-        spanning almost the entire depth of the container at roughly
-        mid-height -- and it does so unconditionally, in *both* branches of
-        `if self.require_shelf: ... else: ...`, regardless of whether this
-        container has the (separate, taller) `has_shelf` shelf at all. It is
-        not one of the container's boundary planes used for inclusion
-        checking (`n_vecs`/`points`), so nothing before this modeled it as
-        an obstruction at all -- exact-geometry search found this out the
-        hard way (measured against the real simulator: a collision at
-        ~1.2cm from this exact fixture, on almost every scenario, after only
-        2-4 items had been placed -- the search kept stacking items in the
-        cut-corner column, right through the fixture's own height range).
-
-        Registering its real AABB in `item_aabbs` (the same list every
-        already-placed item's box lives in) is enough: every check that
-        already walks `item_aabbs` -- landing height, support, exact
-        clearance, path-block -- picks it up automatically, the same way it
-        would pick up a real placed item. `_mark_occupied` mirrors it onto
-        the heightmap too, for whatever still reads that (the online
-        policy's soft/priority conflict lookup).
-
-        Derived directly from `Container._create_small_shelf`'s own call
-        site (`containers.py`): local center
-        `(-length/2 + cut_x/2 + thickness, 0, height/2 + thickness/2 +
-        buffer)`, half-extents `(cut_x/2, width/2 - thickness, thickness/2)`
-        in WORLD axes after the body's own 90-degree rotation about X (which
-        swaps its as-authored Y/Z half-extents into Z/Y). `buffer` isn't
-        part of the observation we receive, but every real bench/sample
-        config in this competition sets it to 0.0 (the dataclass's own
-        default of 0.01 is never actually used), so that's what's assumed
-        here.
-        """
-        if self.cut_x <= 0:
-            return
-        buffer = 0.0
-        # Already a local-frame quantity (no offset_x term), matching how
-        # `self.x_min` etc. are derived above -- unlike `_build_from_packed_items`,
-        # which converts *world* item positions via `self.local_x`, this is
-        # the same local-frame literal `containers.py` itself passes to
-        # `local_to_global` before adding its own offset_x.
-        center_x = -self.length / 2.0 + self.cut_x / 2.0 + self.thickness
-        center_z = self.height / 2.0 + self.thickness / 2.0 + buffer
-        half_x, half_y, half_z = self.cut_x / 2.0, self.width / 2.0 - self.thickness, self.thickness / 2.0
-        lo = (center_x - half_x, -half_y, center_z - half_z)
-        hi = (center_x + half_x, half_y, center_z + half_z)
-        self.item_aabbs.append((lo, hi))
-        self._mark_occupied(lo[0], hi[0], lo[1], hi[1], hi[2], is_soft=False, is_prioritized=False)
 
     def _grid_index_range(self, x0: float, x1: float, y0: float, y1: float):
         ix0 = int(math.floor((x0 - self.x_min) / self.cell_w))

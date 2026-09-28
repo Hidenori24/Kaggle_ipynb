@@ -1,5 +1,3 @@
-import pytest
-
 from gh_baggage_core.container_state import ContainerState
 
 BASE_CONTAINER = {
@@ -93,16 +91,12 @@ def test_chamfer_plane_is_parsed_from_n_vecs_and_points():
 def test_chamfer_plane_data_stops_the_crude_full_ceiling_block():
     # Without plane data (BASE_CONTAINER), the whole band is forced to
     # ceiling_z (see test_cut_corner_keepout_raises_x_min_side_only). With
-    # exact plane data available, ContainerState should NOT apply that crude
-    # blanket block -- the exact chamfer check happens later, in
-    # packing.best_position. The band isn't bare floor either, though: the
-    # simulator's own `Container._create_small_shelf` puts a real physical
-    # fixture there (see _apply_small_shelf_obstruction), so this row reads
-    # that fixture's real height, not the ceiling and not the floor.
+    # exact plane data available, ContainerState should leave the heightmap
+    # alone here -- the exact check happens later, in packing.best_position.
     state = ContainerState(_container_with_chamfer_plane(), grid_n=16)
-    assert not (state.height_grid[0, :] == state.ceiling_z).any()
-    expected_shelf_top = state.height / 2.0 + state.thickness
-    assert state.height_grid[0, :] == pytest.approx(expected_shelf_top)
+    assert (state.height_grid[0, :] == state.floor_z).all()
+    # The risk-scoring keepout flag is unrelated and still applies.
+    assert state.corner_keepout[0, :].all()
     # The risk-scoring keepout flag is unrelated and still applies.
     assert state.corner_keepout[0, :].all()
 
