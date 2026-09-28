@@ -75,7 +75,7 @@ FLOOR_WASTE_WEIGHT = 1.0
 
 
 def rank_placements(states: list[ContainerState], candidates: list[dict], deadline: float | None = None,
-                    floor_waste: bool = True, exact: bool = True):
+                    floor_waste: bool = True, exact: bool = False):
     """Search every (candidate, orientation, container) combination and
     return each candidate item's own best placement, sorted best-first.
 
@@ -96,18 +96,21 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
 
     `exact` picks the search backend: `exact_packing.best_position_exact`
     (real box geometry, via `ContainerState.item_aabbs`) when True, or the
-    older discretized-heightmap `packing.best_position` when False. Same
-    reasoning as `floor_waste` -- the online policy wants the more precise
-    search for the position it actually commits to, but the offline
-    planner only produces an *order*, and swapping the position-scoring
-    backend used at each construction step reshapes which item wins that
-    step's competition, which is exactly the kind of construction-phase
-    perturbation this session has repeatedly measured as regressing hard on
-    the real evaluator even when every individual step's choice looks
-    reasonable in isolation (see docs/FINDINGS.md and DESIGN.md). The
-    offline planner keeps using the grid search it was tuned and validated
-    against; only the online phase's actual, committed placement uses the
-    exact one.
+    older discretized-heightmap `packing.best_position` when False (the
+    default, and what every real caller in this repo passes). The exact
+    search's sparse extreme-point candidate set was tried as the online
+    policy's search backend and measured, against the real simulator, to
+    place fewer items and score dramatically lower than the grid search on
+    every one of the six benchmark scenarios -- even after fixing three
+    real bugs found along the way (an unmodeled physical fixture near the
+    cut corner, missing anchor points that starved it of well-supported
+    stacking/wall-flush positions, and a wrong transport-path height model)
+    it never got close to parity, let alone ahead. See docs/DESIGN.md for
+    the numbers. `exact_packing.py` is kept as an asset (its exact
+    clearance/support/path-block math may still be useful for a future
+    hybrid -- e.g. generating candidates from the grid, then scoring only
+    those exactly), but nothing in this codebase calls it as the primary
+    search anymore.
 
     Each entry is (score, candidate_idx, container_idx, orn_idx, result,
     (dl, dw, dh)). Returns [] if nothing fits anywhere for anyone.
@@ -179,7 +182,7 @@ def rank_placements(states: list[ContainerState], candidates: list[dict], deadli
 
 
 def choose_placement(states: list[ContainerState], candidates: list[dict], deadline: float | None = None,
-                     floor_waste: bool = True, exact: bool = True):
+                     floor_waste: bool = True, exact: bool = False):
     """The single best (candidate, orientation, container, position)
     combination, or None if nothing fits anywhere. See rank_placements."""
     ranked = rank_placements(states, candidates, deadline, floor_waste=floor_waste, exact=exact)
@@ -198,7 +201,7 @@ DEAD_END_PENALTY = 200.0
 
 def pick_with_lookahead(states: list[ContainerState], candidates: list[dict], ranked: list[tuple],
                          deadline: float | None, branch: int, steps: int,
-                         floor_waste: bool = True, exact: bool = True):
+                         floor_waste: bool = True, exact: bool = False):
     """Among the top `branch` first-moves in `ranked`, prefer the one whose
     greedy continuation over the rest of `candidates` (not the future
     stream -- whatever the caller can already see) racks up the least
