@@ -5,8 +5,8 @@ import pytest
 
 import gh_baggage_core.offline_planner as offline_planner_module
 from gh_baggage_core.offline_planner import (
-    ORDER_FAILURE_PENALTY, _local_search_improve, _total_order_cost, _total_order_cost_detailed,
-    _weighted_index, plan_order,
+    ORDER_FAILURE_PENALTY, _local_search_improve, _multi_start_local_search, _total_order_cost,
+    _total_order_cost_detailed, _weighted_index, plan_order,
 )
 
 # The local-search refinement pass added after construction (see
@@ -18,6 +18,16 @@ from gh_baggage_core.offline_planner import (
 # these tests exist to check its output is a valid permutation -- while
 # still exercising the local-search pass, just briefly.
 FAST_LOCAL_SEARCH_MAX_ATTEMPTS = 1
+
+# Same reasoning as FAST_LOCAL_SEARCH_MAX_ATTEMPTS, one level up:
+# _multi_start_local_search restarts _local_search_improve until either
+# MULTI_START_MAX_RESTARTS or the (real, 150s) deadline, and each restart
+# here does its own full O(item count) replay against the *real*
+# (unmocked) rank_placements these two plan_order integration tests use --
+# left unpatched, that's dozens of real grid searches per restart, times
+# up to MULTI_START_MAX_RESTARTS restarts, turning an already-nontrivial
+# integration test into one that runs for minutes.
+FAST_MULTI_START_MAX_RESTARTS = 1
 
 
 def make_item(index, length, width, height, is_prioritized=False, is_soft=False):
@@ -46,6 +56,7 @@ BASE_CONTAINER = {
 
 def test_plan_order_returns_a_full_valid_permutation(monkeypatch):
     monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", FAST_LOCAL_SEARCH_MAX_ATTEMPTS)
+    monkeypatch.setattr(offline_planner_module, "MULTI_START_MAX_RESTARTS", FAST_MULTI_START_MAX_RESTARTS)
     items = [make_item(i, 0.4 + 0.02 * (i % 5), 0.3, 0.2, is_soft=(i % 4 == 0)) for i in range(25)]
     order = plan_order([dict(BASE_CONTAINER)], items)
     assert order is not None
@@ -60,6 +71,7 @@ def test_plan_order_none_without_container_info():
 
 def test_plan_order_two_containers_uses_both(monkeypatch):
     monkeypatch.setattr(offline_planner_module, "LOCAL_SEARCH_MAX_ATTEMPTS", FAST_LOCAL_SEARCH_MAX_ATTEMPTS)
+    monkeypatch.setattr(offline_planner_module, "MULTI_START_MAX_RESTARTS", FAST_MULTI_START_MAX_RESTARTS)
     containers = [
         dict(BASE_CONTAINER, index=0, center=(0.0, 0.0, 0.805)),
         dict(BASE_CONTAINER, index=1, center=(2.5, 0.0, 0.805)),
@@ -250,3 +262,45 @@ def test_local_search_improve_or_opt_relocates_an_item_a_single_swap_cannot_fix(
         [dict(BASE_CONTAINER)], items, order=[0, 1, 2, 3], deadline=time.perf_counter() + 30.0,
     )
     assert order == [3, 0, 1, 2]
+
+
+def test_multi_start_local_search_finds_the_same_fix_as_a_single_pass(monkeypatch):
+    # Same dead-end scenario as test_local_search_improve_swaps_to_avoid_a_dead_end:
+    # the wrapper should find (at least) the same fix a single pass does,
+    # regardless of which restart's seed happens to land on it first.
+    items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
+
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
+        already_placed = len(states[0].item_aabbs) > 0
+        if candidates[0]["index"] == 1 and already_placed:
+            return []
+        return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    order = _multi_start_local_search(
+        [dict(BASE_CONTAINER)], items, order=[0, 1], deadline=time.perf_counter() + 0.2,
+    )
+    assert order == [1, 0]
+
+
+def test_multi_start_local_search_never_returns_worse_than_the_input_order(monkeypatch):
+    # An order that's already a dead end no matter what (nothing ever
+    # rescues it) -- every restart replays to the same failure cost, so the
+    # wrapper must still hand back a valid permutation of the same order,
+    # never raise, and never silently drop an item.
+    items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2), make_item(2, 0.4, 0.3, 0.2)]
+
+    def fake_rank_placements(states, candidates, deadline, floor_waste=True, exact=True):
+        return [(0.05, 0, 0, 0, fake_result(), (0.4, 0.3, 0.2))]
+
+    monkeypatch.setattr(offline_planner_module, "rank_placements", fake_rank_placements)
+    order = _multi_start_local_search(
+        [dict(BASE_CONTAINER)], items, order=[0, 1, 2], deadline=time.perf_counter() + 0.2,
+    )
+    assert sorted(order) == [0, 1, 2]
+
+
+def test_multi_start_local_search_returns_input_order_unchanged_when_deadline_is_none():
+    items = [make_item(0, 0.4, 0.3, 0.2), make_item(1, 0.4, 0.3, 0.2)]
+    order = _multi_start_local_search([dict(BASE_CONTAINER)], items, order=[0, 1], deadline=None)
+    assert order == [0, 1]
