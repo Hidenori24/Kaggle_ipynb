@@ -13,3 +13,6 @@ Kaggle/SIGNATEコンペティションへの取り組みをまとめるリポジ
   逐次配置）ヒューリスティックエージェント。ハイトマップベースの3D bin-packing探索で
   積付位置・向き・コンテナを決定する。詳細は
   [`baggage-loading-robot/README.md`](baggage-loading-robot/README.md) を参照。
+- [`rsna-knee-abnormality-detection/`](rsna-knee-abnormality-detection/) — [RSNA Knee Abnormality Detection](https://www.kaggle.com/competitions/rsna-knee-abnormality-detection)
+  膝MRIの12所見予測（マクロAUC）。Python学習＋C++は前処理/推論に限定する方針。詳細は
+  [`rsna-knee-abnormality-detection/README.md`](rsna-knee-abnormality-detection/README.md) を参照。
