@@ -61,3 +61,13 @@ study単位確率を予測。評価は12ラベルのマクロ平均AUC。
 Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定は `02_cnn_embed.ipynb`）。
 
 `02` は次版で、英語以外のレポートを疑似ラベル学習から除外し、N=600→2000に増やした。
+
+## 提出フロー（コードコンペ・Internet OFF）
+
+1. 学習: `rsna-knee Kaggle run`（`02_cnn_embed.ipynb`）。終了後、重み+LightGBMを private Dataset `rsna-knee-model` に自動公開する。
+2. 提出: Actions の **rsna-knee Kaggle SUBMIT** を手動実行（`confirm` に `SUBMIT` と入力、`message` 必須）。
+   `src/` を Dataset `rsna-knee-src` に更新 → `03_submit.ipynb`（推論のみ・Internet OFF・GPU）をKaggleで実行 → `kaggle competitions submit -k` で提出。
+   **提出枠を消費する唯一のworkflow**。自動では走らない。
+3. 提出の順序: 先に学習workflowを最低1回成功させる（`rsna-knee-model` が無いと提出workflowは失敗する）。
+
+公開リポジトリのため、実行出力（submission.csv・ログ）はArtifactにしない。結果はKaggle側で確認する。

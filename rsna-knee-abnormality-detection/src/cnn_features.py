@@ -12,10 +12,13 @@ N_SLICES = 16
 EMB = 512  # resnet18
 
 
-def load_model(device, pretrained=True):
-    w = torchvision.models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
+def load_model(device, weights_path=None):
+    """ImageNet ResNet18 features. With weights_path (offline) load that state_dict instead of downloading."""
+    w = None if weights_path else torchvision.models.ResNet18_Weights.IMAGENET1K_V1
     m = torchvision.models.resnet18(weights=w)
     m.fc = torch.nn.Identity()
+    if weights_path:
+        m.load_state_dict(torch.load(weights_path, map_location="cpu"))
     return m.eval().to(device)
 
 

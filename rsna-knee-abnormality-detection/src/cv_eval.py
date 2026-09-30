@@ -29,9 +29,22 @@ def cv_report(X, tr, labels, seed=0):
     return oof
 
 
-def fit_predict(Xtr, tr, Xte, labels, ids):
-    sub = pd.DataFrame({"StudyInstanceUID": ids})
+def fit_models(X, tr, labels):
+    """Per label: a fitted LGBMClassifier, or the constant 0.5 when only one class is present."""
+    models = {}
     for c in labels:
         y = tr[c].values.astype(int)
-        sub[c] = 0.5 if y.min() == y.max() else lgb.LGBMClassifier(**PARAMS).fit(Xtr, y).predict_proba(Xte)[:, 1]
+        models[c] = None if y.min() == y.max() else lgb.LGBMClassifier(**PARAMS).fit(X, y)
+    return models
+
+
+def predict_models(models, X, labels, ids):
+    sub = pd.DataFrame({"StudyInstanceUID": ids})
+    for c in labels:
+        m = models.get(c)
+        sub[c] = 0.5 if m is None else m.predict_proba(X)[:, 1]
     return sub
+
+
+def fit_predict(Xtr, tr, Xte, labels, ids):
+    return predict_models(fit_models(Xtr, tr, labels), Xte, labels, ids)
