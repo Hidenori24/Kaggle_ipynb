@@ -33,6 +33,14 @@ study単位確率を予測。評価は12ラベルのマクロ平均AUC。
 
 - [x] 方針決定・雛形
 - [x] レポート疑似ラベル（英語キーワードのみ。他言語は未対応）
-- [ ] DICOM読込・series選択
+- [x] DICOM読込・series選択（`src/dicom_io.py`, `src/features.py`。合成DICOMで動作確認のみ）
+- [x] ベースラインNotebook（`notebooks/01_baseline.ipynb`: 手作り特徴+LightGBM。Kaggle上で未実行）
 - [ ] モデル学習
 - [ ] 提出Notebook / C++ 推論の検証
+
+## Kaggle Notebook での使い方
+
+1. コンペページの Code → New Notebook（データは `/kaggle/input/rsna-knee-abnormality-detection/` に置かれる）。
+2. `notebooks/01_baseline.ipynb` をアップロードして実行（Internet ONで `src/` を git clone する。OFFにする提出時は `src/` をDatasetとして追加し `SRC` を変更）。
+3. 最初は `N=600` で動作確認 → 全件へ。LightGBMのCV AUCは疑似ラベルに対する値で、LBとは一致しない。
+4. 次段階: 2D/3D CNN（事前学習重みをDataset化）、ラベル付きstudyのみでの検証分割。
