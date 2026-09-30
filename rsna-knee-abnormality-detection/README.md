@@ -56,6 +56,8 @@ study単位確率を予測。評価は12ラベルのマクロ平均AUC。
 | ファイル | 内容 | 結果(N=600) |
 |---|---|---|
 | `01_baseline.ipynb` | 手作り特徴+LightGBM | 疑似ラベルAUC 0.72 / 正解ラベルAUC 0.55(n=58) |
-| `02_cnn_embed.ipynb` | ResNet18(ImageNet)のスライス埋め込み+LightGBM。GPU | 未実行 |
+| `02_cnn_embed.ipynb` | ResNet18(ImageNet)のスライス埋め込み+LightGBM。GPU | 疑似0.725 / 正解0.594 |
 
 Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定は `02_cnn_embed.ipynb`）。
+
+`02` は次版で、英語以外のレポートを疑似ラベル学習から除外し、N=600→2000に増やした。
