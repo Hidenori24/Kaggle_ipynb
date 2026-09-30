@@ -50,3 +50,12 @@ study単位確率を予測。評価は12ラベルのマクロ平均AUC。
 `.github/workflows/rsna-knee-kaggle-run.yml` が `kaggle kernels push` でNotebookをKaggleに送って実行し、出力(`submission.csv`, ログ)をArtifactに保存する。
 一度だけ: GitHubリポジトリの Settings → Secrets → Actions に `KAGGLE_USERNAME` / `KAGGLE_KEY` を登録（pokemonと共通）。
 その後は `main` へマージ、または Actions から手動実行で走る。Kaggle側でコンペの Join Competition は済ませておくこと。
+
+## ノートブック
+
+| ファイル | 内容 | 結果(N=600) |
+|---|---|---|
+| `01_baseline.ipynb` | 手作り特徴+LightGBM | 疑似ラベルAUC 0.72 / 正解ラベルAUC 0.55(n=58) |
+| `02_cnn_embed.ipynb` | ResNet18(ImageNet)のスライス埋め込み+LightGBM。GPU | 未実行 |
+
+Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定は `02_cnn_embed.ipynb`）。
