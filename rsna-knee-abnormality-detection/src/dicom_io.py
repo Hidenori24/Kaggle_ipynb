@@ -1,4 +1,5 @@
 """Load a DICOM series as a normalized (D, H, W) float32 volume."""
+import warnings
 from pathlib import Path
 import cv2
 import numpy as np
@@ -22,8 +23,10 @@ def load_series(series_dir, size=128, max_slices=None):
     items = []
     for i, p in enumerate(sorted(Path(series_dir).glob("*.dcm"))):
         try:
-            ds = pydicom.dcmread(str(p))
-            img = ds.pixel_array.astype(np.float32)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                ds = pydicom.dcmread(str(p))
+                img = ds.pixel_array.astype(np.float32)
         except Exception:
             continue
         if img.ndim != 2:
