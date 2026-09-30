@@ -1,0 +1,13 @@
+{
+  "id": "USERNAME/rsna-knee-baseline",
+  "title": "rsna-knee-baseline",
+  "code_file": "01_baseline.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "competition_sources": ["rsna-knee-abnormality-detection"],
+  "dataset_sources": [],
+  "kernel_sources": []
+}

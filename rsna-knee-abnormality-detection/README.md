@@ -44,3 +44,9 @@ study単位確率を予測。評価は12ラベルのマクロ平均AUC。
 2. `notebooks/01_baseline.ipynb` をアップロードして実行（Internet ONで `src/` を git clone する。OFFにする提出時は `src/` をDatasetとして追加し `SRC` を変更）。
 3. 最初は `N=600` で動作確認 → 全件へ。LightGBMのCV AUCは疑似ラベルに対する値で、LBとは一致しない。
 4. 次段階: 2D/3D CNN（事前学習重みをDataset化）、ラベル付きstudyのみでの検証分割。
+
+## 自動実行（GitHub → Kaggle）
+
+`.github/workflows/rsna-knee-kaggle-run.yml` が `kaggle kernels push` でNotebookをKaggleに送って実行し、出力(`submission.csv`, ログ)をArtifactに保存する。
+一度だけ: GitHubリポジトリの Settings → Secrets → Actions に `KAGGLE_USERNAME` / `KAGGLE_KEY` を登録（pokemonと共通）。
+その後は `main` へマージ、または Actions から手動実行で走る。Kaggle側でコンペの Join Competition は済ませておくこと。
