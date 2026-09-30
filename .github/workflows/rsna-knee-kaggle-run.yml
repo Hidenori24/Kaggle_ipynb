@@ -1,0 +1,40 @@
+name: rsna-knee Kaggle run
+
+# Push the baseline notebook to Kaggle and run it there. Triggers on changes to
+# the notebook/src or manually. Needs KAGGLE_USERNAME / KAGGLE_KEY secrets
+# (same as the pokemon workflows). Does NOT submit to the competition.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "rsna-knee-abnormality-detection/notebooks/**"
+      - "rsna-knee-abnormality-detection/src/**"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install kaggle
+      - name: Configure Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+      - name: Push and run on Kaggle
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: bash rsna-knee-abnormality-detection/tools/kaggle_run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kaggle-output
+          path: rsna-knee-abnormality-detection/out
