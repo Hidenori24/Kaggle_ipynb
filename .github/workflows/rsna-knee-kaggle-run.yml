@@ -14,6 +14,7 @@ on:
     paths:
       - "rsna-knee-abnormality-detection/notebooks/**"
       - "rsna-knee-abnormality-detection/src/**"
+      - "!rsna-knee-abnormality-detection/notebooks/03_submit.ipynb"
 
 jobs:
   run:
@@ -37,8 +38,13 @@ jobs:
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: bash rsna-knee-abnormality-detection/tools/kaggle_run.sh "${{ inputs.notebook || '02_cnn_embed.ipynb' }}"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: kaggle-output
-          path: rsna-knee-abnormality-detection/out
+      # Publish the trained weights/models as a private Kaggle Dataset for the offline submit notebook.
+      # (No upload-artifact: this repo is public and the outputs derive from competition data.)
+      - name: Publish model dataset
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          if [ -d rsna-knee-abnormality-detection/out/model_out ]; then
+            python rsna-knee-abnormality-detection/tools/kaggle_dataset.py rsna-knee-model \
+              rsna-knee-abnormality-detection/out/model_out "${GITHUB_SHA::7}" --only 'resnet18_imagenet.pth,models.joblib'
+          else echo "no model_out in kernel output (not the CNN notebook?)"; fi

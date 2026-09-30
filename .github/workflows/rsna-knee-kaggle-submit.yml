@@ -1,0 +1,42 @@
+name: rsna-knee Kaggle SUBMIT
+
+# COMPETITION SUBMISSION -- consumes a daily submission slot. Manual only, and
+# it refuses to run unless `confirm` is exactly SUBMIT. Runs 03_submit.ipynb on
+# Kaggle (Internet OFF, inference only) using the rsna-knee-model dataset that
+# the training workflow publishes, then submits that kernel's submission.csv.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type SUBMIT to really submit to the competition"
+        required: true
+      message:
+        description: Submission message (e.g. what changed)
+        required: true
+
+concurrency: rsna-knee-submit   # never two submissions at once
+
+jobs:
+  submit:
+    if: ${{ inputs.confirm == 'SUBMIT' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install kaggle
+      - name: Configure Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+      - name: Run on Kaggle and submit
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          MSG: ${{ inputs.message }}
+        run: bash rsna-knee-abnormality-detection/tools/kaggle_submit.sh "$MSG"
