@@ -56,7 +56,8 @@ study単位確率を予測。評価は12ラベルのマクロ平均AUC。
 | ファイル | 内容 | 結果(N=600) |
 |---|---|---|
 | `01_baseline.ipynb` | 手作り特徴+LightGBM | 疑似ラベルAUC 0.72 / 正解ラベルAUC 0.55(n=58) |
-| `02_cnn_embed.ipynb` | ResNet18(ImageNet)のスライス埋め込み+LightGBM。GPU | 疑似0.725 / 正解0.594 |
+| `02_cnn_embed.ipynb` | ResNet18(ImageNet)のスライス埋め込み+LightGBM。GPU | 疑似0.725 / 正解0.594。N=4000でLB 0.641 |
+| `04_finetune.ipynb` | ResNet18を3断面×16スライス(224px)でエンドツーエンド学習。スライス間attention pooling。GPU | 未実行 |
 
 Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定は `02_cnn_embed.ipynb`）。
 
@@ -71,3 +72,11 @@ Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定�
 3. 提出の順序: 先に学習workflowを最低1回成功させる（`rsna-knee-model` が無いと提出workflowは失敗する）。
 
 公開リポジトリのため、実行出力（submission.csv・ログ）はArtifactにしない。結果はKaggle側で確認する。
+
+## 04_finetune の構成（`src/finetune.py`）
+
+- 入力: 各studyの Sagittal/Coronal/Axial から選んだseries × 16スライス × 224px を uint8 でディスクにキャッシュ（`/kaggle/temp`。`/kaggle/working` に置くと出力に含まれる）。
+- モデル: 1ch化したImageNet ResNet18を全スライスで共有 → スライス間attention pooling → 断面ごとのベクトルを連結(欠けた断面は0) → 12出力。左右反転の拡張はしない(medial/lateral が入れ替わるため)。
+- 学習: 英語レポート由来の疑似ラベル。正解ラベル58件は評価専用、疑似ラベルの10%を検証に使い、検証AUCが最良のepochを保存。
+- 学習workflowの既定は `04_finetune.ipynb`。`03_submit.ipynb` は `ft_model.pt` があればそれを使い、なければ従来のLightGBM版を使う。
+- 学習workflowは `src/**` の変更でも走る(GPU時間を使う)。README等の変更では走らない。
