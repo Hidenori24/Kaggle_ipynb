@@ -92,7 +92,12 @@ BG = {
     "neg_after": False,
 }
 LANGS = {"tr": TR, "el": EL, "bg": BG}
-_TR_MARK = re.compile(r"\b(izlen\w*|yoktur|normaldir|bulgular\w*|menisku\w*|sinyal artis\w*|tetkik\w*)\b")
+_TR_MARK = re.compile(r"\b(capraz|eklem\w*|yirtik|devamsizlik|izlen\w*|yoktur|normaldir|bulgular\w*|menisku\w*|"
+                      r"sinyal artis\w*|tetkik\w*|kemik|ligaman\w*|sivi)\b")
+# ASCII-only text can still be Spanish/Portuguese/French/German/Italian: treat as 'other' when >=2 such words
+_OTHER_MARK = re.compile(r"\b(del|con|sin|los|las|una|derrame|rotura|ligamento|menisco|nao|sem|ruptura|avec|sans|"
+                         r"epanchement|und|mit|keine|der|die|das|ohne|erguss|riss|nella|della|senza|versamento|"
+                         r"lesione|lesion|rodilla|joelho|genou|knie)\b")
 _SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
 
 
@@ -110,7 +115,9 @@ def detect_lang(text):
     if len(_TR_MARK.findall(fold(t))) >= 2:
         return "tr"
     ascii_share = sum(c.isascii() for c in t) / max(len(t), 1)
-    return "en" if ascii_share > 0.97 else "other"
+    if ascii_share > 0.97 and len(_OTHER_MARK.findall(fold(t))) < 2:
+        return "en"
+    return "other"
 
 
 def label_report_lang(text, lang):
