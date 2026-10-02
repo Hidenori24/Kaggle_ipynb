@@ -57,7 +57,7 @@ study単位確率を予測。評価は12ラベルのマクロ平均AUC。
 |---|---|---|
 | `01_baseline.ipynb` | 手作り特徴+LightGBM | 疑似ラベルAUC 0.72 / 正解ラベルAUC 0.55(n=58) |
 | `02_cnn_embed.ipynb` | ResNet18(ImageNet)のスライス埋め込み+LightGBM。GPU | 疑似0.725 / 正解0.594。N=4000でLB 0.641 |
-| `04_finetune.ipynb` | ResNet18を3断面×16スライス(224px)でエンドツーエンド学習。スライス間attention pooling。GPU | 未実行 |
+| `04_finetune.ipynb` | ResNet18を3断面×16スライス(224px)でエンドツーエンド学習。スライス間attention pooling。GPU | 8epoch: 疑似0.886 / 正解0.644。**LB 0.659** |
 
 Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定は `02_cnn_embed.ipynb`）。
 
@@ -80,3 +80,10 @@ Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定�
 - 学習: 英語レポート由来の疑似ラベル。正解ラベル58件は評価専用、疑似ラベルの10%を検証に使い、検証AUCが最良のepochを保存。
 - 学習workflowの既定は `04_finetune.ipynb`。`03_submit.ipynb` は `ft_model.pt` があればそれを使い、なければ従来のLightGBM版を使う。
 - 学習workflowは `src/**` の変更でも走る(GPU時間を使う)。README等の変更では走らない。
+
+## 提出履歴
+
+| 版 | LB |
+|---|---|
+| 02 埋め込み+LightGBM (N=4000) | 0.641 |
+| 04 ファインチューニング 8epoch | 0.659 |
