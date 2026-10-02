@@ -18,8 +18,8 @@ json.dump({"id": i, "title": t, "code_file": nb, "language": "python", "kernel_t
 PY
 kaggle kernels push -p kaggle_kernel
 ID="${USER_NAME}/${SLUG}"
-# Poll until the kernel finishes (max ~4h).
-for i in $(seq 1 480); do
+# Poll until the kernel finishes (max ~5.8h).
+for i in $(seq 1 700); do
   s=$(kaggle kernels status "$ID" 2>&1 || true); echo "$s"
   case "$s" in *COMPLETE*) break;; *ERROR*|*CANCEL*) echo "kernel failed"; break;; esac
   sleep 30

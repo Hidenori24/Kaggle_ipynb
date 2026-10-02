@@ -21,7 +21,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,5 +48,5 @@ jobs:
         run: |
           if [ -d rsna-knee-abnormality-detection/out/model_out ]; then
             python rsna-knee-abnormality-detection/tools/kaggle_dataset.py rsna-knee-model \
-              rsna-knee-abnormality-detection/out/model_out "${GITHUB_SHA::7}" --only 'resnet18_imagenet.pth,models.joblib,ft_model.pt'
+              rsna-knee-abnormality-detection/out/model_out "${GITHUB_SHA::7}" --only 'resnet18_imagenet.pth,models.joblib,ft_model*.pt'
           else echo "no model_out in kernel output (not the CNN notebook?)"; fi

@@ -1,4 +1,4 @@
-"""Keyword pseudo-labels for the non-English reports (Turkish, Greek, Bulgarian, Spanish, German) + language detection.
+"""Keyword pseudo-labels for the non-English reports (Turkish, Greek, Bulgarian, Spanish, German, French) + language detection.
 
 Text and patterns are folded the same way (lower-case, accents/diacritics removed, dotless i -> i, final sigma -> sigma,
 sharp s -> ss), so patterns can be written in the natural spelling.
@@ -16,7 +16,7 @@ from pseudo_labels import LABELS, label_report
 def fold(s):
     s = unicodedata.normalize("NFKD", str(s).lower())
     s = "".join(c for c in s if not unicodedata.combining(c))
-    return s.replace("ı", "i").replace("ς", "σ").replace("ß", "ss")
+    return s.replace("ı", "i").replace("ς", "σ").replace("ß", "ss").replace("œ", "oe").replace("æ", "ae")
 
 
 def _p(*alts):
@@ -113,6 +113,9 @@ BG = {
 # ---- Spanish -------------------------------------------------------------------------------------
 ES_DEG = (r"condropatia|condromalacia|artrosis|gonartrosis|osteofit|pinzamiento|geodas|degenerativ|"
           r"perdida de cartilago|adelgazamiento|ulcera|erosion|condral")
+_ES_MED = r"((compartimiento|compartimento|femorotibial\w*|condilo( femoral)?|platillo( tibial)?|meseta( tibial)?)[^.;]{0,20}(interno|interna|medial))"
+_ES_LAT = r"((compartimiento|compartimento|femorotibial\w*|condilo( femoral)?|platillo( tibial)?|meseta( tibial)?)[^.;]{0,20}(externo|externa|lateral))"
+_ES_PF = r"(femoropatelar\w*|patelofemoral\w*|femoro-patelar|rotula|rotuliano|rotuliana|faceta|troclea)"
 ES_INJ = r"rotura|ruptura|desgarro|lesion|elongacion|distension|insuficiencia|laxitud|perdida de continuidad|esguince"
 ES_INJ_M = r"rotura|ruptura|desgarro|fisura|grado (iii|3)|asa de cubo|flap|lesion compleja"
 ES = {
@@ -121,11 +124,9 @@ ES = {
         "MCL": _p(r"\bllm\b", r"\bmcl\b", r"colateral medial", r"colateral interno", r"lateral interno", r"\blli\b"),
         "Medial Meniscus": _p(r"menisco interno", r"menisco medial"),
         "Lateral Meniscus": _p(r"menisco externo", r"menisco lateral"),
-        "Medial OA": _p(rf"(compartimiento|compartimento|femorotibial)[^.;]{{0,20}}(interno|medial)[^.;]{{0,80}}({ES_DEG})",
-                        rf"(interno|medial)[^.;]{{0,20}}(compartimiento|compartimento|femorotibial)[^.;]{{0,80}}({ES_DEG})"),
-        "Lateral OA": _p(rf"(compartimiento|compartimento|femorotibial)[^.;]{{0,20}}(externo|lateral)[^.;]{{0,80}}({ES_DEG})",
-                         rf"(externo|lateral)[^.;]{{0,20}}(compartimiento|compartimento|femorotibial)[^.;]{{0,80}}({ES_DEG})"),
-        "PF OA": _p(rf"(femoropatelar|patelofemoral|femoro-patelar|rotuliano|rotuliana|troclea)[^.;]{{0,80}}({ES_DEG})"),
+        "Medial OA": _p(rf"{_ES_MED}[^.;]{{0,80}}({ES_DEG})", rf"({ES_DEG})[^.;]{{0,60}}{_ES_MED}"),
+        "Lateral OA": _p(rf"{_ES_LAT}[^.;]{{0,80}}({ES_DEG})", rf"({ES_DEG})[^.;]{{0,60}}{_ES_LAT}"),
+        "PF OA": _p(rf"{_ES_PF}[^.;]{{0,80}}({ES_DEG})", rf"({ES_DEG})[^.;]{{0,60}}{_ES_PF}"),
         "Effusion": _p(r"derrame", r"liquido (libre )?(intra)?articular", r"hidrartros"),
         "Synovitis": _p(r"sinovitis", r"proliferacion sinovial", r"hiperplasia sinovial", r"sinovial (engrosada|hipertrof)"),
         "Baker's": _p(r"\bbaker", r"quistes? poplit"),
@@ -166,22 +167,50 @@ DE = {
     "neg_post": _p(r"nicht (nachweisbar|abgrenzbar|erkennbar|vorhanden|gesichert|abzugrenzen)", r"ausgeschlossen"),
 }
 
-LANGS = {"tr": TR, "el": EL, "bg": BG, "es": ES, "de": DE}
+
+# ---- French --------------------------------------------------------------------------------------
+FR_DEG = r"chondropathie|arthrose|osteophyt|pincement|amincissement|perte de cartilage|degeneratif|chondra|usure|fibrillation"
+_FR_MED = r"((compartiment|femoro-?tibial\w*|condyle( femoral)?|plateau( tibial)?)[^.;]{0,20}(interne|medial\w*))"
+_FR_LAT = r"((compartiment|femoro-?tibial\w*|condyle( femoral)?|plateau( tibial)?)[^.;]{0,20}(externe|lateral\w*))"
+_FR_PF = r"(femoro-?patellaire|patellofemoral\w*|rotule|trochlee|facette)"
+FR = {
+    "rules": {
+        "ACL": _p(r"croise anterieur", r"\blca\b", r"\bacl\b"),
+        "MCL": _p(r"collateral\w* (medial|interne|tibial)", r"lateral interne", r"\bllm\b", r"\bmcl\b"),
+        "Medial Meniscus": _p(r"menisque (interne|medial)"),
+        "Lateral Meniscus": _p(r"menisque (externe|lateral)"),
+        "Medial OA": _p(rf"{_FR_MED}[^.;]{{0,80}}({FR_DEG})", rf"({FR_DEG})[^.;]{{0,60}}{_FR_MED}"),
+        "Lateral OA": _p(rf"{_FR_LAT}[^.;]{{0,80}}({FR_DEG})", rf"({FR_DEG})[^.;]{{0,60}}{_FR_LAT}"),
+        "PF OA": _p(rf"{_FR_PF}[^.;]{{0,80}}({FR_DEG})", rf"({FR_DEG})[^.;]{{0,60}}{_FR_PF}"),
+        "Effusion": _p(r"epanchement", r"liquide articulaire", r"hydarthrose"),
+        "Synovitis": _p(r"synovite"),
+        "Baker's": _p(r"\bbaker", r"kyste\w* poplit"),
+        "Contusion": _p(r"contusion", r"oedeme (osseux|medullaire|de la moelle)", r"oedeme[^.;]{0,15}moelle"),
+        "Fracture": _p(r"fracture"),
+    },
+    "inj": _inj(r"dechirure|rupture|lesion|entorse|desinsertion|elongation|distension",
+                r"dechirure|fissure|rupture|lesion complexe|grade (3|iii)|anse de seau|flap|transfixiante"),
+    "excl": _p(r"menisque"),
+    "neg_pre": _p(r"\bsans\b", r"\baucun\w*", r"\bpas d", r"\bpas de\b", r"\babsence\b", r"\bexclu", r"\bnegati"),
+    "neg_post": None,
+}
+
+LANGS = {"tr": TR, "el": EL, "bg": BG, "es": ES, "de": DE, "fr": FR}
 _TR_MARK = re.compile(r"\b(capraz|eklem\w*|yirtik|devamsizlik|izlen\w*|yoktur|normaldir|bulgular\w*|menisku\w*|"
                       r"sinyal artis\w*|tetkik\w*|kemik|ligaman\w*|sivi)\b")
 _ES_MARK = re.compile(r"\b(rotura|derrame|rodilla|menisco\w*|ligamento\w*|hallazgos|impresion|senal|cuadricipital|"
                       r"antecedentes|conservada|normales|tendones|cruzados|colaterales)\b")
 _DE_MARK = re.compile(r"\b(gelenkerguss|innenmeniskus|aussenmeniskus|kreuzband\w*|kein\w*|ohne|riss\w*|regelrecht\w*|"
                       r"darstellung|intakt\w*|weichteile|knochenmark\w*|knie\w*|unauffall\w*)\b")
+_FR_MARK = re.compile(r"\b(anterieur|posterieur|epanchement|menisque|croise|dechirure|genou|articulaire|sans|avec|aucun\w*)\b")
 _PT_MARK = re.compile(r"\b(nao|sem|joelho|lesao|articulacao|alteracoes)\b")
 # other Latin-script languages we have no rules for (Portuguese, French, Italian, ...): need >=2 distinct words
-_OTHER_MARK = re.compile(r"\b(nao|sem|ruptura|joelho|avec|sans|epanchement|genou|nella|della|senza|versamento|"
-                         r"lesione|ginocchio|menisque|ligament croise)\b")
+_OTHER_MARK = re.compile(r"\b(nao|sem|ruptura|joelho|nella|della|senza|versamento|lesione|ginocchio)\b")
 _SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
 
 
 def detect_lang(text):
-    """'en' | 'tr' | 'el' | 'bg' | 'es' | 'de' | 'other'."""
+    """'en' | 'tr' | 'el' | 'bg' | 'es' | 'de' | 'fr' | 'other'."""
     t = str(text)
     letters = [c for c in t if c.isalpha()]
     n = max(len(letters), 1)
@@ -194,6 +223,8 @@ def detect_lang(text):
         return "tr"
     if _PT_MARK.search(f):  # Portuguese shares words with Spanish (ligamento, derrame) but not its negation: keep out
         return "other"
+    if len(set(_FR_MARK.findall(f))) >= 2:
+        return "fr"
     es, de = len(set(_ES_MARK.findall(f))), len(set(_DE_MARK.findall(f)))
     if es >= 2 and es >= de:
         return "es"
