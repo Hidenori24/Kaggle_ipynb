@@ -131,3 +131,9 @@ Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定�
 3シードとも、正解ラベルAUCは epoch 4〜6 でピーク(0.73〜0.77)を打ち、その後0.03〜0.07下がる。一方、疑似ラベルAUCは epoch 8〜9 まで上がる。
 → epoch 5以降は疑似ラベルのノイズを覚え始めている可能性が高い。保存epochは疑似ラベルAUCで選ぶため、後半(ノイズを覚えた側)が選ばれていた。
 対策として EPOCHS を 10→6(学習率スケジュールも6epochで完結)。学習時間は約3時間→約1.4時間。
+
+## 次の版: 英語ルールの強化・EMA・診断
+
+- 英語ルール(学習データの約半分)を強化: `torn`/`meniscal`/`oedema`/`synovial thickening`/`chondromalacia`/`osteophyte`/`joint space narrowing` などを追加、文末の否定(`not seen`)に対応、半月板の変性だけの文はOAにしない。
+- `finetune.fit` に重みのEMA(0.998)。epoch後半で疑似ラベルのノイズに寄っていく挙動を平滑化し、EMA重みで評価・保存する。
+- `04_finetune` が、規則ラベルと正解ラベル58件の一致(所見ごとのTP/FP/FN)と、アンサンブルの所見ごとのAUCを表示する。

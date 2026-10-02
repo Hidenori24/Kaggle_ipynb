@@ -114,8 +114,20 @@ def predict(model, X, M, idx, device, bs=8):
     return np.concatenate(out)
 
 
-def fit(X, M, Y, tr_idx, evals, device, epochs=8, bs=8, lr=3e-4, pretrained=True, select="pseudo", log=print):
-    """evals: {name: idx array} held-out sets. The epoch with the best `select` macro AUC is kept."""
+def per_label_auc(Y, P, labels):
+    """(n_pos, AUC) per label; AUC is nan when a label has one class only."""
+    import pandas as pd
+    rows = {}
+    for j, c in enumerate(labels):
+        two = len(np.unique(Y[:, j])) > 1
+        rows[c] = {"n_pos": int(Y[:, j].sum()), "auc": roc_auc_score(Y[:, j], P[:, j]) if two else float("nan")}
+    return pd.DataFrame(rows).T
+
+
+def fit(X, M, Y, tr_idx, evals, device, epochs=8, bs=8, lr=3e-4, pretrained=True, select="pseudo", ema=0.998, log=print):
+    """evals: {name: idx array} held-out sets. The epoch with the best `select` macro AUC is kept.
+    ema: decay of an exponential moving average of the weights, which is what gets evaluated and returned
+    (smooths out the late-epoch drift towards pseudo-label noise); None disables it."""
     model = KneeNet(Y.shape[1], pretrained=pretrained).to(device)
     dl = torch.utils.data.DataLoader(VolDS(X, M, Y, tr_idx), batch_size=bs, shuffle=True, num_workers=2,
                                      drop_last=len(tr_idx) > bs, pin_memory=device != "cpu")
@@ -125,6 +137,18 @@ def fit(X, M, Y, tr_idx, evals, device, epochs=8, bs=8, lr=3e-4, pretrained=True
     scaler = torch.amp.GradScaler(enabled=amp)
     lossf = nn.BCEWithLogitsLoss()
     best, best_state, hist = -1.0, None, []
+    avg = {k: v.detach().clone().float() for k, v in model.state_dict().items()} if ema else None
+    step = 0
+
+    def ema_update():
+        d = min(ema, (1 + step) / (10 + step))  # warm-up: follow the model closely at the start
+        with torch.no_grad():
+            for k, v in model.state_dict().items():
+                if v.dtype.is_floating_point:
+                    avg[k].mul_(d).add_(v.detach().float(), alpha=1 - d)
+                else:
+                    avg[k].copy_(v)
+
     for ep in range(epochs):
         model.train(); t0 = time.time(); tot = 0.0
         for x, m, y in dl:
@@ -133,7 +157,12 @@ def fit(X, M, Y, tr_idx, evals, device, epochs=8, bs=8, lr=3e-4, pretrained=True
                 loss = lossf(model(x, m.to(device)).float(), y.to(device))
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward(); scaler.step(opt); scaler.update(); sched.step()
-            tot += loss.item()
+            tot += loss.item(); step += 1
+            if ema:
+                ema_update()
+        if ema:  # evaluate the averaged weights, then go back to the raw training weights
+            raw = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            model.load_state_dict({k: avg[k].to(raw[k].dtype) for k in raw})
         scores = {n: macro_auc(Y[i], predict(model, X, M, i, device)) for n, i in evals.items() if len(i)}
         hist.append(scores)
         log(f"epoch {ep + 1}/{epochs} loss {tot / len(dl):.4f} {scores} {time.time() - t0:.0f}s")
@@ -141,5 +170,7 @@ def fit(X, M, Y, tr_idx, evals, device, epochs=8, bs=8, lr=3e-4, pretrained=True
         s = -1.0 if s != s else s  # nan (a label with one class only) must not freeze the first epoch
         if best_state is None or s > best:
             best = s; best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        if ema:
+            model.load_state_dict(raw)
     model.load_state_dict(best_state)
     return model, hist
