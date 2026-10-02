@@ -1,10 +1,11 @@
-"""Keyword pseudo-labels for the non-English reports (Turkish, Greek, Bulgarian) plus language detection.
+"""Keyword pseudo-labels for the non-English reports (Turkish, Greek, Bulgarian, Spanish, German) + language detection.
 
-Text and patterns are folded the same way (lower-case, accents/diacritics removed, dotless i -> i,
-final sigma -> sigma), so patterns can be written in the natural spelling.
-Negation: Turkish puts it after the finding (verb-final), Greek/Bulgarian before it.
-These rules are hand-written and have only been checked on invented sentences; compare the per-language
-positive rates with English before trusting them (the notebook prints that table).
+Text and patterns are folded the same way (lower-case, accents/diacritics removed, dotless i -> i, final sigma -> sigma,
+sharp s -> ss), so patterns can be written in the natural spelling.
+Negation scope differs by language: Turkish puts it after the finding (verb-final), Greek/Bulgarian/Spanish before it,
+German both. For ACL / MCL / meniscus labels a tear/injury word is required in the same sentence.
+The rules are hand-written; they were written from word-frequency lists of the real reports (no report text) and checked
+only on invented sentences. Compare per-language positive rates with English before trusting them (the notebook prints them).
 """
 import re
 import unicodedata
@@ -15,39 +16,51 @@ from pseudo_labels import LABELS, label_report
 def fold(s):
     s = unicodedata.normalize("NFKD", str(s).lower())
     s = "".join(c for c in s if not unicodedata.combining(c))
-    return s.replace("ı", "i").replace("ς", "σ")
+    return s.replace("ı", "i").replace("ς", "σ").replace("ß", "ss")
 
 
 def _p(*alts):
     return re.compile(fold("|".join(alts)))
 
 
+_LIG = ("ACL", "MCL", "Medial Meniscus", "Lateral Meniscus")
+_OA = ("Medial OA", "Lateral OA", "PF OA")
+
+
+def _inj(ligament, meniscus):
+    return {"ACL": _p(ligament), "MCL": _p(ligament), "Medial Meniscus": _p(meniscus), "Lateral Meniscus": _p(meniscus)}
+
+
 # ---- Turkish -------------------------------------------------------------------------------------
-TR_INJ = r"yirtik|ruptur|devamsizlik|kopuk|kopma|zedelen|hasar|grade (3|iii)"
-TR_DEG = r"artroz|kartilaj\w* (incel|kayb|defekt|harap)|osteofit|kondromalazi|dejenerati|dejenerasyon"
+TR_DEG = (r"artroz|kikirdak\w* (incel|kayb|harap|defekt)|kartilaj\w* (incel|kayb|harap|defekt)|kayb|incelme|daralma|"
+          r"osteofit|kondromalazi|dejenerati|dejenerasyon|subkondral (skleroz|kist|odem)")
+_TR_COMP = r"(medial|medyal)[^.;]{0,40}(femorotibial|tibiofemoral|kompartman|eklem)"
+_TR_LCOMP = r"lateral[^.;]{0,40}(femorotibial|tibiofemoral|kompartman|eklem)"
 TR = {
     "rules": {
         "ACL": _p(r"\bacl\b", r"on capraz"),
-        "MCL": _p(r"\bmcl\b", r"medial kol+ateral", r"tibial kol+ateral"),
-        "Medial Meniscus": _p(r"medial menisk"),
+        "MCL": _p(r"\bmcl\b", r"(medial|medyal) kol+ateral", r"tibial kol+ateral", r"kol+ateral bag"),
+        "Medial Meniscus": _p(r"(medial|medyal) menisk"),
         "Lateral Meniscus": _p(r"lateral menisk"),
-        "Medial OA": _p(rf"medial (femorotibial|tibiofemoral|kompartman)[^.;]{{0,80}}({TR_DEG})"),
-        "Lateral OA": _p(rf"lateral (femorotibial|tibiofemoral|kompartman)[^.;]{{0,80}}({TR_DEG})"),
+        "Medial OA": _p(rf"{_TR_COMP}[^.;]{{0,80}}({TR_DEG})"),
+        "Lateral OA": _p(rf"{_TR_LCOMP}[^.;]{{0,80}}({TR_DEG})"),
         "PF OA": _p(rf"(patellofemoral|femoropatellar|femoro-patellar)[^.;]{{0,80}}({TR_DEG})"),
         "Effusion": _p(r"\bsivi", r"efuzyon"),
         "Synovitis": _p(r"sinovit", r"sinovyal (kalinlas|proliferasyon|inflamasyon)"),
-        "Baker's": _p(r"\bbaker", r"popliteal kist"),
-        "Contusion": _p(r"kontuzyon", r"kemik ilig\w* odem", r"kemik ili\w* sinyal artis", r"bone bruise"),
+        "Baker's": _p(r"\bbaker", r"popliteal kist", r"popliteal fossa\w* kist"),
+        "Contusion": _p(r"kontuzyon", r"kemik ilig\w*[^.;]{0,25}odem", r"kemik ilik\w*[^.;]{0,25}odem",
+                        r"kemik ilig\w* sinyal artis", r"subkondral odem", r"bone bruise"),
         "Fracture": _p(r"\bkirik", r"fraktur", r"fissur"),
     },
-    "inj": {k: _p(TR_INJ) for k in ("ACL", "MCL", "Medial Meniscus", "Lateral Meniscus")},
-    "neg": _p(r"yoktur", r"izlenmedi", r"izlenmemis", r"izlenmez", r"gorulmedi", r"gorulmemis", r"saptanmadi",
-              r"saptanmamis", r"normal", r"dogal", r"fizyolojik", r"mevcut degil", r"bulunmamaktadir"),
-    "neg_after": True,
+    "inj": _inj(r"yirtik|ruptur|devamsizlik|kopuk|kopma|zedelen|hasar|sprain|burkul|grade (2|3|ii|iii)",
+                r"yirtik|ruptur|devamsizlik|kopuk|kopma|grade (3|iii)"),
+    "excl": _p(r"menisk"),
+    "neg_pre": None,
+    "neg_post": _p(r"yoktur", r"izlenmedi", r"izlenmemis", r"izlenmez", r"gorulmedi", r"gorulmemis", r"saptanmadi",
+                   r"saptanmamis", r"normal", r"dogal", r"fizyolojik", r"mevcut degil", r"bulunmamaktadir"),
 }
 
 # ---- Greek ---------------------------------------------------------------------------------------
-EL_INJ = r"ρηξ|ρωγμ|διακοπ|διαρρηξ|σχισμ|βαθμου 3|grade 3"
 EL_DEG = r"οστεοαρθριτ|εκφυλιστ|χονδρ|οστεοφυτ|αραιωση"
 EL = {
     "rules": {
@@ -64,79 +77,154 @@ EL = {
         "Contusion": _p(r"θλασ", r"οιδημα[^.;]{0,25}μυελ", r"μωλωπ"),
         "Fracture": _p(r"καταγμ", r"fraktur"),
     },
-    "inj": {k: _p(EL_INJ) for k in ("ACL", "MCL", "Medial Meniscus", "Lateral Meniscus")},
-    "neg": _p(r"δεν (παρατηρ|ανιχν|υπαρχ|διακριν|ευρεθ|απεικον|φαινετ)", r"χωρις", r"αρνητικ", r"απουσι"),
-    "neg_after": False,
+    "inj": _inj(r"ρηξ|ρωγμ|διακοπ|διαρρηξ|σχισμ|βαθμου 3|grade 3", r"ρηξ|ρωγμ|διακοπ|διαρρηξ|σχισμ|βαθμου 3|grade 3"),
+    "excl": None,
+    "neg_pre": _p(r"δεν (παρατηρ|ανιχν|υπαρχ|διακριν|ευρεθ|απεικον|φαινετ)", r"χωρις", r"αρνητικ", r"απουσι"),
+    "neg_post": None,
 }
 
 # ---- Bulgarian -----------------------------------------------------------------------------------
-BG_INJ = r"руптур|разкъс|прекъсн|разрив|скъсан|нарушена цялост|grade 3|3 степен|iii степен"
-BG_DEG = r"артроз|дегенерат|остеофит|хрущял\w* (изтънен|загуб|дефект)"
+BG_INJ = r"руптур|разкъс|прекъсн|разрив|скъсван|скъсан|увред|нарушена цялост|grade 3|3 степен|iii степен"
+BG_DEG = r"артроз|дегенерат|остеофит|хрущял\w* (изтънен|загуб|дефект)|изтънен"
 BG = {
     "rules": {
         "ACL": _p(r"\bacl\b", r"предн\w* кръст", r"пкл"),
         "MCL": _p(r"\bmcl\b", r"медиал\w* колатерал", r"вътрешн\w* колатерал", r"мкл"),
         "Medial Meniscus": _p(r"медиал\w* менискус", r"вътрешн\w* менискус"),
         "Lateral Meniscus": _p(r"латерал\w* менискус", r"външн\w* менискус"),
-        "Medial OA": _p(rf"медиал\w* (феморотибиал\w* )?(компартмент|отдел)[^.;]{{0,80}}({BG_DEG})"),
-        "Lateral OA": _p(rf"латерал\w* (феморотибиал\w* )?(компартмент|отдел)[^.;]{{0,80}}({BG_DEG})"),
-        "PF OA": _p(rf"(пателофеморал|феморопателар)\w*[^.;]{{0,80}}({BG_DEG})"),
+        "Medial OA": _p(rf"медиал\w*[^.;]{{0,60}}({BG_DEG})", rf"({BG_DEG})[^.;]{{0,60}}медиал\w*"),
+        "Lateral OA": _p(rf"латерал\w*[^.;]{{0,60}}({BG_DEG})", rf"({BG_DEG})[^.;]{{0,60}}латерал\w*"),
+        "PF OA": _p(rf"(патела|пателофемор|феморопател|пателар)\w*[^.;]{{0,60}}({BG_DEG})",
+                    rf"({BG_DEG})[^.;]{{0,60}}(патела|пателофемор)\w*"),
         "Effusion": _p(r"излив", r"течност в ставата", r"свободна течност"),
         "Synovitis": _p(r"синовит", r"синовиална (пролиферация|задебеляване)"),
-        "Baker's": _p(r"бейкър", r"\bbaker", r"подколенн\w* кист"),
-        "Contusion": _p(r"контузи", r"костен оток", r"оток[^.;]{0,15}мозък"),
+        "Baker's": _p(r"бейкър", r"бекер", r"\bbaker", r"подколенн\w* кист", r"поплитеал\w* кист",
+                      r"кист\w*[^.;]{0,20}поплитеал"),
+        "Contusion": _p(r"контузи", r"костен оток", r"оток[^.;]{0,15}мозък", r"костномозъчен едем",
+                        r"едем[^.;]{0,25}(костн|мозък)"),
         "Fracture": _p(r"фрактур", r"счупван", r"фисур", r"счупен"),
     },
-    "inj": {k: _p(BG_INJ) for k in ("ACL", "MCL", "Medial Meniscus", "Lateral Meniscus")},
-    "neg": _p(r"не се (установ|вижд|наблюдав|визуализ|открив|констат)", r"\bбез\b", r"липсва", r"отсъства", r"няма"),
-    "neg_after": False,
+    "inj": _inj(BG_INJ, BG_INJ),
+    "excl": _p(r"менискус"),
+    "neg_pre": _p(r"не се (установ|вижд|наблюдав|визуализ|открив|констат)", r"\bбез\b", r"липсва", r"отсъства", r"няма"),
+    "neg_post": None,
 }
-LANGS = {"tr": TR, "el": EL, "bg": BG}
+
+# ---- Spanish -------------------------------------------------------------------------------------
+ES_DEG = (r"condropatia|condromalacia|artrosis|gonartrosis|osteofit|pinzamiento|geodas|degenerativ|"
+          r"perdida de cartilago|adelgazamiento|ulcera|erosion|condral")
+ES_INJ = r"rotura|ruptura|desgarro|lesion|elongacion|distension|insuficiencia|laxitud|perdida de continuidad|esguince"
+ES_INJ_M = r"rotura|ruptura|desgarro|fisura|grado (iii|3)|asa de cubo|flap|lesion compleja"
+ES = {
+    "rules": {
+        "ACL": _p(r"\blca\b", r"\bacl\b", r"cruzado anterior"),
+        "MCL": _p(r"\bllm\b", r"\bmcl\b", r"colateral medial", r"colateral interno", r"lateral interno", r"\blli\b"),
+        "Medial Meniscus": _p(r"menisco interno", r"menisco medial"),
+        "Lateral Meniscus": _p(r"menisco externo", r"menisco lateral"),
+        "Medial OA": _p(rf"(compartimiento|compartimento|femorotibial)[^.;]{{0,20}}(interno|medial)[^.;]{{0,80}}({ES_DEG})",
+                        rf"(interno|medial)[^.;]{{0,20}}(compartimiento|compartimento|femorotibial)[^.;]{{0,80}}({ES_DEG})"),
+        "Lateral OA": _p(rf"(compartimiento|compartimento|femorotibial)[^.;]{{0,20}}(externo|lateral)[^.;]{{0,80}}({ES_DEG})",
+                         rf"(externo|lateral)[^.;]{{0,20}}(compartimiento|compartimento|femorotibial)[^.;]{{0,80}}({ES_DEG})"),
+        "PF OA": _p(rf"(femoropatelar|patelofemoral|femoro-patelar|rotuliano|rotuliana|troclea)[^.;]{{0,80}}({ES_DEG})"),
+        "Effusion": _p(r"derrame", r"liquido (libre )?(intra)?articular", r"hidrartros"),
+        "Synovitis": _p(r"sinovitis", r"proliferacion sinovial", r"hiperplasia sinovial", r"sinovial (engrosada|hipertrof)"),
+        "Baker's": _p(r"\bbaker", r"quistes? poplit"),
+        "Contusion": _p(r"contusion", r"edema (oseo|medular|de medula)", r"edema[^.;]{0,15}medula osea"),
+        "Fracture": _p(r"fractura", r"fisura osea"),
+    },
+    "inj": _inj(ES_INJ, ES_INJ_M),
+    "excl": _p(r"menisc"),
+    "neg_pre": _p(r"\bsin\b", r"\bno (se )?\w+", r"\bausencia\b", r"\bdescart", r"\bnegativ", r"\blibre de"),
+    "neg_post": None,
+}
+
+# ---- German --------------------------------------------------------------------------------------
+DE_DEG = (r"chondropathie|arthrose|gonarthrose|osteophyt|knorpelschaden|knorpelverlust|knorpeldefekt|chondromalazie|"
+          r"degenerativ|gelenkspaltverschmalerung|subchondral\w* (sklerose|zyste|odem)")
+DE_INJ = r"riss|ruptur|ausriss|zerrung|lasion|insuffizienz|distorsion|elongation|kontinuitatsunterbrechung"
+DE_INJ_M = r"riss|ruptur|korbhenkel|lasion|grad (iii|3)"
+DE = {
+    "rules": {
+        "ACL": _p(r"vorder\w* kreuzband", r"\bvkb\b", r"\bacl\b"),
+        "MCL": _p(r"innenband", r"medial\w* kollateral", r"medial\w* seitenband", r"\bmcl\b"),
+        "Medial Meniscus": _p(r"innenmeniskus", r"medial\w* meniskus"),
+        "Lateral Meniscus": _p(r"aussenmeniskus", r"lateral\w* meniskus"),
+        "Medial OA": _p(rf"(medial\w*|innen)[^.;]{{0,20}}(kompartiment|femorotibial\w*)[^.;]{{0,80}}({DE_DEG})",
+                        rf"(kompartiment|femorotibial\w*)[^.;]{{0,20}}medial\w*[^.;]{{0,80}}({DE_DEG})"),
+        "Lateral OA": _p(rf"(lateral\w*|aussen)[^.;]{{0,20}}(kompartiment|femorotibial\w*)[^.;]{{0,80}}({DE_DEG})",
+                         rf"(kompartiment|femorotibial\w*)[^.;]{{0,20}}lateral\w*[^.;]{{0,80}}({DE_DEG})"),
+        "PF OA": _p(rf"(retropatellar\w*|femoropatellar\w*|patellofemoral\w*|patellargleitlager|trochlea)[^.;]{{0,80}}({DE_DEG})"),
+        "Effusion": _p(r"gelenkerguss", r"\berguss", r"ergus"),
+        "Synovitis": _p(r"synovitis", r"synovialitis", r"synovial\w* (verdick|proliferation)"),
+        "Baker's": _p(r"\bbaker", r"poplite\w* zyste", r"zyste\w*[^.;]{0,20}poplite"),
+        "Contusion": _p(r"knochenmark\w*[- ]?odem", r"kontusion", r"bone bruise", r"knochenmarkskontusion"),
+        "Fracture": _p(r"fraktur", r"knochenbruch", r"infraktion"),
+    },
+    "inj": _inj(DE_INJ, DE_INJ_M),
+    "excl": _p(r"meniskus"),
+    "neg_pre": _p(r"\bkein\w*", r"\bohne\b", r"\bnicht\b", r"ausschluss"),
+    "neg_post": _p(r"nicht (nachweisbar|abgrenzbar|erkennbar|vorhanden|gesichert|abzugrenzen)", r"ausgeschlossen"),
+}
+
+LANGS = {"tr": TR, "el": EL, "bg": BG, "es": ES, "de": DE}
 _TR_MARK = re.compile(r"\b(capraz|eklem\w*|yirtik|devamsizlik|izlen\w*|yoktur|normaldir|bulgular\w*|menisku\w*|"
                       r"sinyal artis\w*|tetkik\w*|kemik|ligaman\w*|sivi)\b")
-# ASCII-only text can still be Spanish/Portuguese/French/German/Italian: treat as 'other' when >=2 such words
-_OTHER_MARK = re.compile(r"\b(del|con|sin|los|las|una|derrame|rotura|ligamento|menisco|nao|sem|ruptura|avec|sans|"
-                         r"epanchement|und|mit|keine|der|die|das|ohne|erguss|riss|nella|della|senza|versamento|"
-                         r"lesione|lesion|rodilla|joelho|genou|knie)\b")
+_ES_MARK = re.compile(r"\b(rotura|derrame|rodilla|menisco\w*|ligamento\w*|hallazgos|impresion|senal|cuadricipital|"
+                      r"antecedentes|conservada|normales|tendones|cruzados|colaterales)\b")
+_DE_MARK = re.compile(r"\b(gelenkerguss|innenmeniskus|aussenmeniskus|kreuzband\w*|kein\w*|ohne|riss\w*|regelrecht\w*|"
+                      r"darstellung|intakt\w*|weichteile|knochenmark\w*|knie\w*|unauffall\w*)\b")
+_PT_MARK = re.compile(r"\b(nao|sem|joelho|lesao|articulacao|alteracoes)\b")
+# other Latin-script languages we have no rules for (Portuguese, French, Italian, ...): need >=2 distinct words
+_OTHER_MARK = re.compile(r"\b(nao|sem|ruptura|joelho|avec|sans|epanchement|genou|nella|della|senza|versamento|"
+                         r"lesione|ginocchio|menisque|ligament croise)\b")
 _SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
 
 
 def detect_lang(text):
-    """'en' | 'tr' | 'el' | 'bg' | 'other' (other = e.g. Latin-script languages we have no rules for)."""
+    """'en' | 'tr' | 'el' | 'bg' | 'es' | 'de' | 'other'."""
     t = str(text)
     letters = [c for c in t if c.isalpha()]
     n = max(len(letters), 1)
-    greek = sum(0x370 <= ord(c) <= 0x3FF or 0x1F00 <= ord(c) <= 0x1FFF for c in letters) / n
-    cyr = sum(0x400 <= ord(c) <= 0x4FF for c in letters) / n
-    if greek > 0.3:
+    if sum(0x370 <= ord(c) <= 0x3FF or 0x1F00 <= ord(c) <= 0x1FFF for c in letters) / n > 0.3:
         return "el"
-    if cyr > 0.3:
+    if sum(0x400 <= ord(c) <= 0x4FF for c in letters) / n > 0.3:
         return "bg"
-    if len(_TR_MARK.findall(fold(t))) >= 2:
+    f = fold(t)
+    if len(set(_TR_MARK.findall(f))) >= 2:
         return "tr"
+    if _PT_MARK.search(f):  # Portuguese shares words with Spanish (ligamento, derrame) but not its negation: keep out
+        return "other"
+    es, de = len(set(_ES_MARK.findall(f))), len(set(_DE_MARK.findall(f)))
+    if es >= 2 and es >= de:
+        return "es"
+    if de >= 2:
+        return "de"
+    if len(set(_OTHER_MARK.findall(f))) >= 2:
+        return "other"
     ascii_share = sum(c.isascii() for c in t) / max(len(t), 1)
-    if ascii_share > 0.97 and len(_OTHER_MARK.findall(fold(t))) < 2:
-        return "en"
-    return "other"
+    return "en" if ascii_share > 0.97 else "other"
 
 
 def label_report_lang(text, lang):
     if lang == "en":
         return label_report(text)
     cfg = LANGS.get(lang)
-    if cfg is None:
-        return {c: 0 for c in LABELS}
     out = {c: 0 for c in LABELS}
+    if cfg is None:
+        return out
     for sent in _SPLIT.split(fold(text)):
         for name in LABELS:
             if out[name]:
+                continue
+            if name in _OA and cfg["excl"] is not None and cfg["excl"].search(sent):
                 continue
             for m in cfg["rules"][name].finditer(sent):
                 inj = cfg["inj"].get(name)
                 if inj is not None and not inj.search(sent):
                     continue
-                scope = sent[m.end():] if cfg["neg_after"] else sent[max(0, m.start() - 70):m.start()]
-                if cfg["neg"].search(scope):
+                if cfg["neg_pre"] is not None and cfg["neg_pre"].search(sent[max(0, m.start() - 70):m.start()]):
+                    continue
+                if cfg["neg_post"] is not None and cfg["neg_post"].search(sent[m.end():m.end() + 150]):
                     continue
                 out[name] = 1
                 break
