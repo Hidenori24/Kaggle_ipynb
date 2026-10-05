@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       notebook:
-        description: notebook file under notebooks/
+        description: notebook file under notebooks/ (04_finetune.ipynb = train on GPU; 05_label_diag.ipynb = CPU label diagnostics, ~1 min)
         default: 04_finetune.ipynb
   push:
     branches: [main]
@@ -17,6 +17,7 @@ on:
       - "!rsna-knee-abnormality-detection/notebooks/03_submit.ipynb"
       - "!rsna-knee-abnormality-detection/notebooks/01_baseline.ipynb"
       - "!rsna-knee-abnormality-detection/notebooks/02_cnn_embed.ipynb"
+      - "!rsna-knee-abnormality-detection/notebooks/05_label_diag.ipynb"
 
 jobs:
   run:

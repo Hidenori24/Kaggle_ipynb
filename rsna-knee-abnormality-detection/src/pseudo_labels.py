@@ -33,6 +33,10 @@ INJURY = {
     "Lateral Meniscus": r"tear|torn|ruptur|bucket|flap|displaced|fissur|grade (iii|3)",
 }
 _OA = ("Medial OA", "Lateral OA", "PF OA")
+# "tricompartmental osteoarthritis", "multicompartmental degenerative change", "diffuse osteoarthritis": all three compartments
+GENERAL_OA = re.compile(r"(tri|multi|pan)[- ]?compartment\w*[^.;]{0,60}(osteoarth|arthrosis|degenerat|arthritis)|"
+                        r"(osteoarth|arthrosis|degenerat\w* (joint disease|arthritis))[^.;]{0,60}(tri|multi|pan)[- ]?compartment|"
+                        r"(diffuse|generali[sz]ed|advanced)[^.;]{0,30}(osteoarth|arthrosis)", re.I)
 
 
 def label_report(text: str) -> dict:
@@ -54,6 +58,12 @@ def label_report(text: str) -> dict:
             hit = 1
             break
         out[name] = hit
+    for m in GENERAL_OA.finditer(text):
+        start = max(0, text.rfind(".", 0, m.start()) + 1)
+        if not NEG.search(text[start:m.start()]):
+            for name in _OA:
+                out[name] = 1
+            break
     return out
 
 

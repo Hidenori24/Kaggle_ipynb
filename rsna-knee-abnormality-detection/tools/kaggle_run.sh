@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Push a notebook from notebooks/ to Kaggle and run it there.
-# Usage: kaggle_run.sh [01_baseline|02_cnn_embed|04_finetune].ipynb   (needs a configured kaggle CLI)
+# Usage: kaggle_run.sh [01_baseline|02_cnn_embed|04_finetune|05_label_diag].ipynb   (needs a configured kaggle CLI)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NB=${1:-04_finetune.ipynb}
