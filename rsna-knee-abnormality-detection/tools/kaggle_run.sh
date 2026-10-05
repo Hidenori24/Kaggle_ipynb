@@ -8,12 +8,17 @@ USER_NAME=${KAGGLE_USERNAME:-$(python3 -c "import json,os;print(json.load(open(o
 SLUG="rsna-knee-$(basename "$NB" .ipynb | sed 's/^[0-9]*_//; s/_/-/g')"
 GPU=false; case "$NB" in *cnn*|*finetune*|*llm*) GPU=true;; esac
 rm -f kaggle_kernel/*.ipynb; cp "notebooks/$NB" "kaggle_kernel/$NB"
-python3 - "$USER_NAME/$SLUG" "$SLUG" "$NB" "$GPU" <<'PY'
+DATASETS=""
+case "$NB" in *finetune*)   # the LLM labels (published by the 06 run) are an input of the training notebook
+  if kaggle datasets status "$USER_NAME/rsna-knee-labels" >/dev/null 2>&1; then DATASETS="$USER_NAME/rsna-knee-labels"; fi;; esac
+echo "dataset sources: ${DATASETS:-none}"
+python3 - "$USER_NAME/$SLUG" "$SLUG" "$NB" "$GPU" "$DATASETS" <<'PY'
 import json, sys
-i, t, nb, gpu = sys.argv[1:]
+i, t, nb, gpu, ds = sys.argv[1:]
 json.dump({"id": i, "title": t, "code_file": nb, "language": "python", "kernel_type": "notebook",
            "is_private": True, "enable_gpu": gpu == "true", "enable_internet": True,
-           "competition_sources": ["rsna-knee-abnormality-detection"], "dataset_sources": [], "kernel_sources": []},
+           "competition_sources": ["rsna-knee-abnormality-detection"], "dataset_sources": [d for d in ds.split(",") if d],
+           "kernel_sources": []},
           open("kaggle_kernel/kernel-metadata.json", "w"), indent=2)
 PY
 PUSH_OUT=$(kaggle kernels push -p kaggle_kernel 2>&1) || true

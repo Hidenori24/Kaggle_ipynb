@@ -193,7 +193,7 @@ def fit(X, M, Y, tr_idx, evals, device, epochs=8, bs=8, lr=3e-4, pretrained=True
         if ema:  # evaluate the averaged weights, then go back to the raw training weights
             raw = {k: v.detach().clone() for k, v in model.state_dict().items()}
             model.load_state_dict({k: avg[k].to(raw[k].dtype) for k in raw})
-        scores = {n: macro_auc(Y[i], predict(model, X, M, i, device, META=META)) for n, i in evals.items() if len(i)}
+        scores = {n: macro_auc(Y[i] >= 0.5, predict(model, X, M, i, device, META=META)) for n, i in evals.items() if len(i)}   # soft targets: score on 0/1
         hist.append(scores)
         log(f"epoch {ep + 1}/{epochs} loss {tot / len(dl):.4f} {scores} {time.time() - t0:.0f}s")
         s = scores.get(select, -1.0)

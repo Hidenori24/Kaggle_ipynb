@@ -189,3 +189,17 @@ LLM(Qwen2.5-7B-Instruct 4bit。入らなければ3B fp16)にレポートを読�
 - 2回目: `Maximum batch GPU session count of 2 reached`。Kaggleの同時GPUセッションは2つまで。#54・#55のマージで `04_finetune` が自動で2つ走っていた。
   → `rsna-knee Kaggle run` は手動実行のみにした(pushでは走らない)。`kaggle_run.sh` は送信に失敗したら終了コード1で止まる(古い実行のステータスを読まない)。
 - ノートブックのリポジトリのclone先を `/kaggle/working/repo` → `/kaggle/temp/repo` に変更(実行の出力に.gitや全ファイルが入って、Actionsのログが埋もれていた)。
+
+## 06 の結果: LLMラベルは規則より大幅に良い → 本番の学習に使う
+
+正解58件に対する macro AUC: 規則 0.729 / **LLM 0.864** / 平均 0.853(LLM単体のほうが良い)。
+所見別(規則→LLM): Medial OA 0.67→0.96、Medial Meniscus 0.71→0.92、Lateral Meniscus 0.67→0.87、PF OA 0.64→0.84、Synovitis 0.66→0.78。
+英語以外の報告で再現率 0.56→0.79(オランダ語・クロアチア語・その他も規則なしで読める)。プロンプトはコンペの説明の定義から書き、58件では調整していない。
+画像モデルの正解ラベルAUC(約0.72)は規則ラベルのAUC(0.729)とほぼ同じ=教わったラベルの質が天井になっていた。
+
+使い方(手動実行、順番に):
+1. `rsna-knee Kaggle run` に `06_llm_labels.ipynb`: 58件の評価表のあと全レポートを処理(`RUN_ALL=True`)し `labels_out/llm_labels.csv`(確率つき)を作る。
+   正常終了すると workflow が private Dataset `rsna-knee-labels` に公開する(失敗した実行では公開しない)。
+2. `rsna-knee Kaggle run` に `04_finetune.ipynb`: Dataset `rsna-knee-labels` があれば自動でアタッチされ(`kaggle_run.sh`)、
+   `LABEL_SOURCE='llm'` でソフトラベル(確率)を学習ターゲットにする。言語の制限がなくなり全レポートが使える。無ければ規則ラベルに戻る。
+   学習中の検証AUCはソフトラベルを0/1に直して計算する。正解ラベル付き58件は従来どおり評価専用。

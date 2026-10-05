@@ -42,3 +42,11 @@ jobs:
             python rsna-knee-abnormality-detection/tools/kaggle_dataset.py rsna-knee-model \
               rsna-knee-abnormality-detection/out/model_out "${GITHUB_SHA::7}" --only 'resnet18_imagenet.pth,models.joblib,ft_model*.pt'
           else echo "no model_out in kernel output (not the CNN notebook?)"; fi
+      - name: Publish LLM label dataset
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          if [ -f rsna-knee-abnormality-detection/out/labels_out/llm_labels.csv ]; then
+            python rsna-knee-abnormality-detection/tools/kaggle_dataset.py rsna-knee-labels \
+              rsna-knee-abnormality-detection/out/labels_out "${GITHUB_SHA::7}" --only 'llm_labels.csv'
+          else echo "no labels_out in kernel output (not the 06 notebook, or RUN_ALL is off)"; fi
