@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Push a notebook from notebooks/ to Kaggle and run it there.
-# Usage: kaggle_run.sh [01_baseline|02_cnn_embed|04_finetune].ipynb   (needs a configured kaggle CLI)
+# Usage: kaggle_run.sh [01_baseline|02_cnn_embed|04_finetune|05_label_diag|06_llm_labels].ipynb   (needs a configured kaggle CLI)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NB=${1:-04_finetune.ipynb}
 USER_NAME=${KAGGLE_USERNAME:-$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.kaggle/kaggle.json')))['username'])")}
 SLUG="rsna-knee-$(basename "$NB" .ipynb | sed 's/^[0-9]*_//; s/_/-/g')"
-GPU=false; case "$NB" in *cnn*|*finetune*) GPU=true;; esac
+GPU=false; case "$NB" in *cnn*|*finetune*|*llm*) GPU=true;; esac
 rm -f kaggle_kernel/*.ipynb; cp "notebooks/$NB" "kaggle_kernel/$NB"
 python3 - "$USER_NAME/$SLUG" "$SLUG" "$NB" "$GPU" <<'PY'
 import json, sys
