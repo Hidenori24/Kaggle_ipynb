@@ -157,3 +157,12 @@ Actionsの実行対象は手動実行時の `notebook` 入力で選ぶ（既定�
 - 英語: tricompartmental / multicompartmental / diffuse osteoarthritis の総称表現を、3つのOAラベルすべてに付ける。
 - `05_label_diag.ipynb`(GPU不要・約1分): 規則ラベルと正解58件の一致表、所見ごとに「正解陽性で多い語」「規則が見逃した報告で多い語」「誤検出で多い語」(語の文書頻度のみ、本文は出さない)。
   Actions の `rsna-knee Kaggle run` を手動実行し、`notebook` に `05_label_diag.ipynb` を指定する。
+
+## LLMでレポートを読んでラベルを作る(`06_llm_labels.ipynb`, `src/llm_labels.py`)
+
+規則ラベルは正解58件との比較で適合率0.65・再現率0.60。規則を手で直す代わりに、KaggleのGPU上でオープンな重みの
+LLM(Qwen2.5-7B-Instruct 4bit。入らなければ3B fp16)にレポートを読ませ、12所見を判定させる。レポートはKaggle上でローカルに処理するだけで外に出さない。
+- 出力は `{"ACL":0,...}` のJSON。値のトークンを生成する瞬間の「1」対「0」の確率から、所見ごとのソフトラベルが1パスで得られる。
+- ステージ3(この版): 正解58件だけで、規則とLLMを同じ表(適合率・再現率・AUC・両者の平均)で比較する。学習は走らせない。
+  `rsna-knee Kaggle run` を手動実行し、`notebook` に `06_llm_labels.ipynb` を指定する(GPUを使う。1分あたりの処理速度から全件の所要時間も出す)。
+- ステージ4: 良ければ `RUN_ALL=True` で全レポートを処理して `labels_out/llm_labels.csv` を作り、`04_finetune` のラベルに使う(規則との平均なども可)。
