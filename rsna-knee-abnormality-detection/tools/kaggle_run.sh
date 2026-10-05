@@ -19,10 +19,24 @@ PY
 kaggle kernels push -p kaggle_kernel
 ID="${USER_NAME}/${SLUG}"
 # Poll until the kernel finishes (max ~5.8h).
+FAILED=0
 for i in $(seq 1 700); do
   s=$(kaggle kernels status "$ID" 2>&1 || true); echo "$s"
-  case "$s" in *COMPLETE*) break;; *ERROR*|*CANCEL*) echo "kernel failed"; break;; esac
+  case "$s" in *COMPLETE*) break;; *ERROR*|*CANCEL*) echo "kernel failed"; FAILED=1; break;; esac
   sleep 30
 done
 mkdir -p out && kaggle kernels output "$ID" -p out || true
 ls -la out
+if [ "$FAILED" = 1 ]; then   # make the Actions run red and show where the notebook stopped
+  echo "=== last lines of the Kaggle log (kernel: https://www.kaggle.com/code/$ID) ==="
+  python3 - <<'PY' || true
+import glob, json
+for f in glob.glob("out/*.log"):
+    try:
+        rows = json.load(open(f))
+        print("".join(r.get("data", "") for r in rows[-60:]))
+    except Exception:
+        print(open(f, errors="ignore").read()[-4000:])
+PY
+  exit 1
+fi
