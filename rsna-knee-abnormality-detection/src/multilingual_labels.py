@@ -1,4 +1,4 @@
-"""Keyword pseudo-labels for the non-English reports (Turkish, Greek, Bulgarian, Spanish, German, French) + language detection.
+"""Keyword pseudo-labels for the non-English reports (Turkish, Greek, Bulgarian, Spanish, German, French, Dutch, Croatian) + language detection.
 
 Text and patterns are folded the same way (lower-case, accents/diacritics removed, dotless i -> i, final sigma -> sigma,
 sharp s -> ss), so patterns can be written in the natural spelling.
@@ -16,7 +16,7 @@ from pseudo_labels import LABELS, label_report
 def fold(s):
     s = unicodedata.normalize("NFKD", str(s).lower())
     s = "".join(c for c in s if not unicodedata.combining(c))
-    return s.replace("ı", "i").replace("ς", "σ").replace("ß", "ss").replace("œ", "oe").replace("æ", "ae")
+    return s.replace("ı", "i").replace("ς", "σ").replace("ß", "ss").replace("œ", "oe").replace("æ", "ae").replace("đ", "d")
 
 
 def _p(*alts):
@@ -52,7 +52,7 @@ TR = {
                         r"kemik ilig\w* sinyal artis", r"subkondral odem", r"bone bruise"),
         "Fracture": _p(r"\bkirik", r"fraktur", r"fissur"),
     },
-    "inj": _inj(r"yirtik|ruptur|devamsizlik|kopuk|kopma|zedelen|hasar|sprain|burkul|grade (2|3|ii|iii)",
+    "inj": _inj(r"yirtik|ruptur|devamsizlik|kopuk|kopma|zedelen|hasar|sprain|burkul",
                 r"yirtik|ruptur|devamsizlik|kopuk|kopma|grade (3|iii)"),
     "excl": _p(r"menisk"),
     "neg_pre": None,
@@ -195,7 +195,58 @@ FR = {
     "neg_post": None,
 }
 
-LANGS = {"tr": TR, "el": EL, "bg": BG, "es": ES, "de": DE, "fr": FR}
+
+# ---- Dutch ---------------------------------------------------------------------------------------
+NL_DEG = (r"artrose|osteofyt|kraakbeen\w* (verlies|defect|beschadig|degenerat)|degeneratie|gewrichtsspleet|chondromalacie|"
+          r"subchondrale (sclerose|cyste)")
+NL_INJ = r"scheur|ruptuur|ruptur|beschadig|verrekking|distorsie|letsel|discontinu|insufficienti|laxiteit|avulsie"
+NL = {
+    "rules": {
+        "ACL": _p(r"voorste kruisband", r"\bvkb\b", r"\bacl\b"),
+        "MCL": _p(r"mediale? collateral", r"mediale? zijband", r"binnenste zijband", r"\bmcl\b"),
+        "Medial Meniscus": _p(r"mediale? meniscus", r"binnenmeniscus"),
+        "Lateral Meniscus": _p(r"laterale? meniscus", r"buitenmeniscus"),
+        "Medial OA": _p(rf"mediaal (femorotibiaal|compartiment)[^.;]{{0,80}}({NL_DEG})", rf"mediale? (femorotibiale?|compartiment)[^.;]{{0,80}}({NL_DEG})"),
+        "Lateral OA": _p(rf"lateraal (femorotibiaal|compartiment)[^.;]{{0,80}}({NL_DEG})", rf"laterale? (femorotibiale?|compartiment)[^.;]{{0,80}}({NL_DEG})"),
+        "PF OA": _p(rf"(patellofemoraal|femoropatellair|retropatellair)[^.;]{{0,80}}({NL_DEG})"),
+        "Effusion": _p(r"effusie", r"gewrichtsvocht", r"vocht in (het )?gewricht", r"hemartros", r"hydrops"),
+        "Synovitis": _p(r"synovitis", r"synoviale (verdikking|hypertrofie|proliferatie)"),
+        "Baker's": _p(r"\bbaker", r"popliteale? cyste"),
+        "Contusion": _p(r"contusie", r"bone bruise", r"botoedeem", r"beenmerg\w* ?oedeem", r"beenmergcontusie"),
+        "Fracture": _p(r"fractuur", r"\bbreuk", r"fissuur", r"avulsiefractuur"),
+    },
+    "inj": _inj(NL_INJ, r"scheur|ruptuur|ruptur|korfhandvat|flap|graad (3|iii)"),
+    "excl": _p(r"menisc"),
+    "neg_pre": _p(r"\bgeen\b", r"\bzonder\b", r"\bniet\b", r"uitgesloten", r"\bafwezig"),
+    "neg_post": _p(r"niet (gezien|zichtbaar|aangetoond|waargenomen)", r"afwezig", r"uitgesloten"),
+}
+
+# ---- Croatian / Serbian / Bosnian ----------------------------------------------------------------
+HR_DEG = (r"artroz|osteofit|degenerativ|hrskavic\w* (stanjen|oste|gubit|defekt)|gubitak hrskavic|osteoartritis|"
+          r"kondromalacij|suzenj\w* (zglobn\w* )?prostor")
+HR_INJ = r"ruptur|puknuc|prekid|ozljed|rastrg|natrg|distorz|lezij"
+HR = {
+    "rules": {
+        "ACL": _p(r"prednj\w* krizn", r"\bacl\b"),
+        "MCL": _p(r"medijaln\w* kolateraln", r"unutarnj\w* kolateraln", r"\bmcl\b"),
+        "Medial Meniscus": _p(r"medijaln\w* menisk"),
+        "Lateral Meniscus": _p(r"lateraln\w* menisk"),
+        "Medial OA": _p(rf"medijaln\w* (femorotibijaln\w*|kompartment\w*|odjeljak)[^.;]{{0,80}}({HR_DEG})"),
+        "Lateral OA": _p(rf"lateraln\w* (femorotibijaln\w*|kompartment\w*|odjeljak)[^.;]{{0,80}}({HR_DEG})"),
+        "PF OA": _p(rf"(patelofemoraln|femoropatelarn|retropatelarn)\w*[^.;]{{0,80}}({HR_DEG})"),
+        "Effusion": _p(r"izljev", r"tekucin"),
+        "Synovitis": _p(r"sinovit", r"sinovijaln\w* (zadeblj|hipertrofij|proliferacij)"),
+        "Baker's": _p(r"\bbaker", r"poplitealn\w* cist", r"cist\w*[^.;]{0,20}poplite"),
+        "Contusion": _p(r"kontuzij", r"edem\w*[^.;]{0,25}srz", r"modric\w* kost"),
+        "Fracture": _p(r"fraktur", r"prijelom", r"fisur"),
+    },
+    "inj": _inj(HR_INJ, r"ruptur|puknuc|natrg|rascjep|lezij|grade (3|iii)|stupnj\w* (3|iii)"),
+    "excl": _p(r"menisk"),
+    "neg_pre": _p(r"\bbez\b", r"\bnema\b", r"\bnije\b", r"\bne (se )?\w+", r"iskljuc"),
+    "neg_post": None,
+}
+
+LANGS = {"tr": TR, "el": EL, "bg": BG, "es": ES, "de": DE, "fr": FR, "nl": NL, "hr": HR}
 _TR_MARK = re.compile(r"\b(capraz|eklem\w*|yirtik|devamsizlik|izlen\w*|yoktur|normaldir|bulgular\w*|menisku\w*|"
                       r"sinyal artis\w*|tetkik\w*|kemik|ligaman\w*|sivi)\b")
 _ES_MARK = re.compile(r"\b(rotura|derrame|rodilla|menisco\w*|ligamento\w*|hallazgos|impresion|senal|cuadricipital|"
@@ -203,6 +254,12 @@ _ES_MARK = re.compile(r"\b(rotura|derrame|rodilla|menisco\w*|ligamento\w*|hallaz
 _DE_MARK = re.compile(r"\b(gelenkerguss|innenmeniskus|aussenmeniskus|kreuzband\w*|kein\w*|ohne|riss\w*|regelrecht\w*|"
                       r"darstellung|intakt\w*|weichteile|knochenmark\w*|knie\w*|unauffall\w*)\b")
 _FR_MARK = re.compile(r"\b(anterieur|posterieur|epanchement|menisque|croise|dechirure|genou|articulaire|sans|avec|aucun\w*)\b")
+_NL_MARK = re.compile(r"\b(knie|scheur|besluit|voorste|achterste|kruisband|gewricht\w*|geen|zonder|niet|vocht|botoedeem|"
+                      r"beenmerg\w*|kraakbeen\w*|ruptuur|bevindingen|conclusie|cyste)\b")
+_HR_MARK = re.compile(r"\b(zglob\w*|krizn\w*|strazn\w*|prednj\w*|hrskavic\w*|izljev|nalaz\w*|zakljucak|koljen\w*|"
+                      r"medijaln\w*|lateraln\w*|nema|bez)\b")
+# an English report has English function words; ASCII-only text without them is another Latin-script language
+_EN_FUNC = re.compile(r"\b(the|and|with|there|are|seen|noted|evidence|consistent|without|from|which|that|this|within|of)\b")
 _PT_MARK = re.compile(r"\b(nao|sem|joelho|lesao|articulacao|alteracoes)\b")
 # other Latin-script languages we have no rules for (Portuguese, French, Italian, ...): need >=2 distinct words
 _OTHER_MARK = re.compile(r"\b(nao|sem|ruptura|joelho|nella|della|senza|versamento|lesione|ginocchio)\b")
@@ -210,7 +267,7 @@ _SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
 
 
 def detect_lang(text):
-    """'en' | 'tr' | 'el' | 'bg' | 'es' | 'de' | 'fr' | 'other'."""
+    """'en' | 'tr' | 'el' | 'bg' | 'es' | 'de' | 'fr' | 'nl' | 'hr' | 'other'."""
     t = str(text)
     letters = [c for c in t if c.isalpha()]
     n = max(len(letters), 1)
@@ -232,8 +289,12 @@ def detect_lang(text):
         return "de"
     if len(set(_OTHER_MARK.findall(f))) >= 2:
         return "other"
+    if len(set(_NL_MARK.findall(f))) >= 2:
+        return "nl"
+    if len(set(_HR_MARK.findall(f))) >= 2:
+        return "hr"
     ascii_share = sum(c.isascii() for c in t) / max(len(t), 1)
-    return "en" if ascii_share > 0.97 else "other"
+    return "en" if ascii_share > 0.97 and len(set(_EN_FUNC.findall(f))) >= 2 else "other"
 
 
 def label_report_lang(text, lang):
@@ -251,8 +312,10 @@ def label_report_lang(text, lang):
                 continue
             for m in cfg["rules"][name].finditer(sent):
                 inj = cfg["inj"].get(name)
-                if inj is not None and not inj.search(sent):
-                    continue
+                if inj is not None:
+                    region = sent[max(0, m.start() - 100): m.end() + 100] if name in ("Medial Meniscus", "Lateral Meniscus") else sent
+                    if not inj.search(region):
+                        continue
                 if cfg["neg_pre"] is not None and cfg["neg_pre"].search(sent[max(0, m.start() - 70):m.start()]):
                     continue
                 if cfg["neg_post"] is not None and cfg["neg_post"].search(sent[m.end():m.end() + 150]):

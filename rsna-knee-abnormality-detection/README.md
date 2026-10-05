@@ -166,3 +166,17 @@ LLM(Qwen2.5-7B-Instruct 4bit。入らなければ3B fp16)にレポートを読�
 - ステージ3(この版): 正解58件だけで、規則とLLMを同じ表(適合率・再現率・AUC・両者の平均)で比較する。学習は走らせない。
   `rsna-knee Kaggle run` を手動実行し、`notebook` に `06_llm_labels.ipynb` を指定する(GPUを使う。1分あたりの処理速度から全件の所要時間も出す)。
 - ステージ4: 良ければ `RUN_ALL=True` で全レポートを処理して `labels_out/llm_labels.csv` を作り、`04_finetune` のラベルに使う(規則との平均なども可)。
+
+## 05_label_diag の結果と、それを受けた修正
+
+- 正解58件の言語内訳は en 31 / es 13 / tr 6 / el 3 / bg 3 / de 2 で `other` が無い。一方、規則が見逃した報告の頻出語には
+  オランダ語(scheur, botoedeem, besluit, knie)とクロアチア語(zgloba, križni, stražnji, hrskavice)が並ぶ。
+  ASCII中心の文字なので `en` と判定され、英語規則で全ラベル0(=読めなかっただけの偽陰性)になっていた。訓練データ全体にも同じ混入があるはず。
+- `detect_lang`: ASCII中心のテキストは英語の機能語(the/and/with/there…)が2種類以上ないと `en` にしない(無ければ `other`)。
+  オランダ語(`nl`)・クロアチア語/セルビア語(`hr`)の判定と規則を追加。
+- 誤検出の修正(精度が低かった所見): Contusion は変性・嚢胞・骨棘と同じ文の骨髄浮腫を除外(`subchondral edema` / `bone marrow lesion` も外した)。
+  MCL は `grade 2`(半月板のシグナル等級)を損傷語から外した。半月板の裂傷語は、その言及の前後100文字・同じ節(`;`で区切る)の中にあるものだけを採用する。
+- `kaggle_run.sh`: Kaggle側でカーネルがERRORになってもActionsが緑になっていたため、失敗時は終了コード1にし、Kaggleログの末尾を表示する。
+- 05 に言語別(en/es/tr/…)の規則 vs 正解の適合率・再現率と、訓練データ全体の言語内訳を追加。
+- 注意: 正解58件は訓練データ全体より陽性が多い(例 Synovitis 0.47 vs 規則0.11、Fracture 0.31 vs 0.07)。ラベル付きの部分集合は異常を多く含むよう選ばれているらしく、
+  Synovitis など画像から付けられたと思われるラベルはレポートに書かれていない場合があり、規則の再現率には上限がある。
