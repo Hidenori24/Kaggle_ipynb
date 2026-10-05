@@ -180,3 +180,12 @@ LLM(Qwen2.5-7B-Instruct 4bit。入らなければ3B fp16)にレポートを読�
 - 05 に言語別(en/es/tr/…)の規則 vs 正解の適合率・再現率と、訓練データ全体の言語内訳を追加。
 - 注意: 正解58件は訓練データ全体より陽性が多い(例 Synovitis 0.47 vs 規則0.11、Fracture 0.31 vs 0.07)。ラベル付きの部分集合は異常を多く含むよう選ばれているらしく、
   Synovitis など画像から付けられたと思われるラベルはレポートに書かれていない場合があり、規則の再現率には上限がある。
+
+## 06_llm_labels の1回目の失敗と修正
+
+- 1回目: GPUメモリ不足(OOM)。長いレポート(ギリシャ語・トルコ語はトークンが多い)をバッチ8でまとめたため、注意機構の行列が3.5GBを超えた。
+  `label_reports` を、バッチサイズ×最長プロンプト ≤ 5000トークンになるようバッチ分けし(レポートは1200トークンで切る)、
+  それでもOOMになったバッチは半分に割って再試行、1件でもOOMなら0のまま続行、とした。`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` も設定。
+- 2回目: `Maximum batch GPU session count of 2 reached`。Kaggleの同時GPUセッションは2つまで。#54・#55のマージで `04_finetune` が自動で2つ走っていた。
+  → `rsna-knee Kaggle run` は手動実行のみにした(pushでは走らない)。`kaggle_run.sh` は送信に失敗したら終了コード1で止まる(古い実行のステータスを読まない)。
+- ノートブックのリポジトリのclone先を `/kaggle/working/repo` → `/kaggle/temp/repo` に変更(実行の出力に.gitや全ファイルが入って、Actionsのログが埋もれていた)。

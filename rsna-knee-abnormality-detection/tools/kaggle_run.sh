@@ -16,7 +16,12 @@ json.dump({"id": i, "title": t, "code_file": nb, "language": "python", "kernel_t
            "competition_sources": ["rsna-knee-abnormality-detection"], "dataset_sources": [], "kernel_sources": []},
           open("kaggle_kernel/kernel-metadata.json", "w"), indent=2)
 PY
-kaggle kernels push -p kaggle_kernel
+PUSH_OUT=$(kaggle kernels push -p kaggle_kernel 2>&1) || true
+echo "$PUSH_OUT"
+if echo "$PUSH_OUT" | grep -qi "error"; then   # e.g. "Maximum batch GPU session count of 2 reached": do not read the status of an old run
+  echo "kernel push failed -- nothing was started. If this says the GPU session limit was reached, stop a running session on Kaggle or wait for it to finish."
+  exit 1
+fi
 ID="${USER_NAME}/${SLUG}"
 # Poll until the kernel finishes (max ~5.8h).
 FAILED=0

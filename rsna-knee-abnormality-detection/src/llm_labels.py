@@ -70,22 +70,39 @@ def parse_json_values(text):
     return np.array([int(found.get(k, 0)) for k in LABELS], np.int8), len(found)
 
 
+def _truncate(tok, report, max_report_tokens):
+    """Cut a report to at most max_report_tokens tokens (Greek / Turkish text takes many more tokens per character)."""
+    r = str(report)
+    ids = tok(r, add_special_tokens=False)["input_ids"]
+    return tok.decode(ids[:max_report_tokens]) if len(ids) > max_report_tokens else r
+
+
 @torch.no_grad()
-def label_reports(model, tok, reports, bs=8, max_new_tokens=100, max_chars=5000, log_every=10):
-    """-> (hard (n,12) int8, prob (n,12) float32, n_parsed (n,)). Returns in the order of `reports`."""
+def label_reports(model, tok, reports, bs=8, max_new_tokens=100, max_chars=5000, log_every=10,
+                  max_report_tokens=1200, max_batch_tokens=5000):
+    """-> (hard (n,12) int8, prob (n,12) float32, n_parsed (n,)). Returns in the order of `reports`.
+    Batches are built so that batch size x longest prompt <= max_batch_tokens (the attention matrix grows with the square of the
+    length: bs=8 with long Greek/Turkish reports ran out of GPU memory); a batch that still runs out of memory is split."""
     tok.padding_side = "left"
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     zero_ids, one_ids = _single_token_ids(tok, "0"), _single_token_ids(tok, "1")
-    prompts = [tok.apply_chat_template(build_messages(r, max_chars), tokenize=False, add_generation_prompt=True) + PREFILL
-               for r in reports]
-    order = np.argsort([len(p) for p in prompts])            # similar lengths together: less padding
+    prompts = [tok.apply_chat_template(build_messages(_truncate(tok, r, max_report_tokens), max_chars),
+                                       tokenize=False, add_generation_prompt=True) + PREFILL for r in reports]
+    lens = [len(x) for x in tok(prompts, add_special_tokens=False)["input_ids"]]
+    order = np.argsort(lens)                                   # similar lengths together: less padding
+    batches, cur = [], []
+    for k in order:                                            # ascending: the newest item is the longest one
+        if cur and (len(cur) >= bs or (len(cur) + 1) * lens[k] > max_batch_tokens):
+            batches.append(cur); cur = []
+        cur.append(int(k))
+    if cur:
+        batches.append(cur)
     hard = np.zeros((len(prompts), len(LABELS)), np.int8)
-    prob = np.full((len(prompts), len(LABELS)), np.nan, np.float32)
+    prob = np.zeros((len(prompts), len(LABELS)), np.float32)
     n_parsed = np.zeros(len(prompts), np.int16)
-    t0 = time.time()
-    for b, i in enumerate(range(0, len(order), bs)):
-        idx = order[i:i + bs]
+
+    def run(idx):
         enc = tok([prompts[k] for k in idx], return_tensors="pt", padding=True).to(model.device)
         out = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False, output_scores=True,
                              return_dict_in_generate=True, pad_token_id=tok.pad_token_id)
@@ -96,6 +113,22 @@ def label_reports(model, tok, reports, bs=8, max_new_tokens=100, max_chars=5000,
             hard[k], n_parsed[k] = parse_json_values(text)
             p = extract_probs(ids, [s[r] for s in out.scores], tok, zero_ids, one_ids)
             prob[k] = p if p is not None else hard[k].astype(np.float32)      # fall back to the parsed hard answer
+
+    def run_safe(idx):
+        try:
+            run(idx)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            if len(idx) > 1:
+                h = len(idx) // 2
+                run_safe(idx[:h]); run_safe(idx[h:])
+            else:
+                print(f"out of memory on a single report (prompt tokens {lens[idx[0]]}); labels left at 0", flush=True)
+
+    t0, done = time.time(), 0
+    for b, idx in enumerate(batches):
+        run_safe(idx)
+        done += len(idx)
         if b % log_every == 0:
-            print(f"labeled {min(i + bs, len(order))}/{len(order)}  {time.time() - t0:.0f}s", flush=True)
+            print(f"labeled {done}/{len(prompts)}  {time.time() - t0:.0f}s", flush=True)
     return hard, prob, n_parsed

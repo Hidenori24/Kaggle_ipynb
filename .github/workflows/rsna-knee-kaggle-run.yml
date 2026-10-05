@@ -1,7 +1,7 @@
 name: rsna-knee Kaggle run
 
-# Push the baseline notebook to Kaggle and run it there. Triggers on changes to
-# the notebook/src or manually. Needs KAGGLE_USERNAME / KAGGLE_KEY secrets
+# Push a notebook to Kaggle and run it there. Manual only (Run workflow): Kaggle allows 2 concurrent GPU sessions and
+# ~30 GPU hours a week, and every push to main used to start a 1-hour training run. Needs KAGGLE_USERNAME / KAGGLE_KEY secrets
 # (same as the pokemon workflows). Does NOT submit to the competition.
 on:
   workflow_dispatch:
@@ -9,16 +9,6 @@ on:
       notebook:
         description: notebook file under notebooks/ (04_finetune.ipynb = train on GPU; 05_label_diag.ipynb = CPU label diagnostics, ~1 min; 06_llm_labels.ipynb = LLM label check on GPU)
         default: 04_finetune.ipynb
-  push:
-    branches: [main]
-    paths:
-      - "rsna-knee-abnormality-detection/notebooks/**"
-      - "rsna-knee-abnormality-detection/src/**"
-      - "!rsna-knee-abnormality-detection/notebooks/03_submit.ipynb"
-      - "!rsna-knee-abnormality-detection/notebooks/01_baseline.ipynb"
-      - "!rsna-knee-abnormality-detection/notebooks/02_cnn_embed.ipynb"
-      - "!rsna-knee-abnormality-detection/notebooks/05_label_diag.ipynb"
-      - "!rsna-knee-abnormality-detection/notebooks/06_llm_labels.ipynb"
 
 jobs:
   run:
