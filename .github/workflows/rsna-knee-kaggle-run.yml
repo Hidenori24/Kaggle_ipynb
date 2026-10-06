@@ -50,7 +50,11 @@ jobs:
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: |
-          if [ -f rsna-knee-abnormality-detection/out/labels_out/llm_labels.csv ]; then
+          if ls rsna-knee-abnormality-detection/out/labels_out/llm_labels*.csv >/dev/null 2>&1; then
+            # a new dataset version replaces all files: first fetch the label files of earlier runs (other prompt variants), then add the new ones
+            mkdir -p merged_labels && (kaggle datasets download -d "$KAGGLE_USERNAME/rsna-knee-labels" -p merged_labels --unzip || true)
+            cp rsna-knee-abnormality-detection/out/labels_out/llm_labels*.csv merged_labels/
+            ls -la merged_labels
             python rsna-knee-abnormality-detection/tools/kaggle_dataset.py rsna-knee-labels \
-              rsna-knee-abnormality-detection/out/labels_out "${GITHUB_SHA::7}" --only 'llm_labels.csv'
-          else echo "no labels_out in kernel output (not the 06 notebook, or RUN_ALL is off)"; fi
+              merged_labels "${GITHUB_SHA::7}" --only 'llm_labels*.csv'
+          else echo "no labels_out in kernel output (not a labeling notebook, or the run option is off)"; fi
