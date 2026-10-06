@@ -203,3 +203,24 @@ LLM(Qwen2.5-7B-Instruct 4bit。入らなければ3B fp16)にレポートを読�
 2. `rsna-knee Kaggle run` に `04_finetune.ipynb`: Dataset `rsna-knee-labels` があれば自動でアタッチされ(`kaggle_run.sh`)、
    `LABEL_SOURCE='llm'` でソフトラベル(確率)を学習ターゲットにする。言語の制限がなくなり全レポートが使える。無ければ規則ラベルに戻る。
    学習中の検証AUCはソフトラベルを0/1に直して計算する。正解ラベル付き58件は従来どおり評価専用。
+
+## LLMラベルで学習した04の結果(規則ラベル版との比較)
+
+| | 正解58件 macro AUC |
+|---|---|
+| 規則ラベル(3シードのアンサンブル) | 0.735 |
+| **LLMラベル(3シード)** | seed0/1/2 = 0.837/0.832/0.846、アンサンブル **0.849** |
+
+epoch 1 の時点で0.79〜0.80(規則ラベルでは0.68〜0.70)。所見別(アンサンブル): Baker's 0.984、Medial OA 0.953、Contusion 0.918、Fracture 0.913、Effusion 0.909、Medial Meniscus 0.843、ACL 0.825、Lateral OA 0.820、
+Lateral Meniscus 0.783、PF OA 0.766、Synovitis 0.747、MCL 0.726。
+モデル vs LLMラベル自身のAUC(06): Effusion/Baker's/Contusion/Fracture はモデルがラベルを上回る(画像からラベル以上を読めている)。
+ACL(0.83 vs 0.91)・MCL(0.73 vs 0.93)・Medial Meniscus(0.84 vs 0.92)・Lateral Meniscus・PF OA は届いていない=靱帯・半月板などの細かい構造は画像側が限界。
+
+## 次の設定B: 画像側の改善と、設定違いモデルの平均
+
+- `04_finetune`: `CENTER = 0.7`(各seriesの中央70%から16枚)、`USE_META = True`(DICOMヘッダーを最終層へ)、`EPOCHS = 5`、`RUN_TAG = 'b'`。
+  モデルは `ft_model_<RUN_TAG>_s<seed>.pt` で保存する。
+- 学習workflow: 新しいDatasetのversionは全ファイルを置き換えるため、公開の前に既存の `rsna-knee-model` をダウンロードして新しいモデルを足す
+  (前の設定のモデル=タグなしの `ft_model_s0..2.pt` は残る)。
+- `03_submit`: すべての `ft_model*.pt` を読み、(size, k, center) が同じモデルごとにテスト画像のキャッシュを作って、全モデルの予測を平均する。
+- 古い設定のモデルを消すには、Kaggleの Datasets で `rsna-knee-model` の該当ファイルを削除する(または新しいDatasetを作る)。
