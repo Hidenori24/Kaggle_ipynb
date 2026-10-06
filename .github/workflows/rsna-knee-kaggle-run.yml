@@ -39,8 +39,12 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: |
           if [ -d rsna-knee-abnormality-detection/out/model_out ]; then
+            # a new dataset version replaces all files, so first fetch the models of earlier runs (other RUN_TAGs) and add the new ones
+            mkdir -p merged && (kaggle datasets download -d "$KAGGLE_USERNAME/rsna-knee-model" -p merged --unzip || true)
+            cp rsna-knee-abnormality-detection/out/model_out/* merged/
+            ls -la merged
             python rsna-knee-abnormality-detection/tools/kaggle_dataset.py rsna-knee-model \
-              rsna-knee-abnormality-detection/out/model_out "${GITHUB_SHA::7}" --only 'resnet18_imagenet.pth,models.joblib,ft_model*.pt'
+              merged "${GITHUB_SHA::7}" --only 'resnet18_imagenet.pth,models.joblib,ft_model*.pt'
           else echo "no model_out in kernel output (not the CNN notebook?)"; fi
       - name: Publish LLM label dataset
         env:
