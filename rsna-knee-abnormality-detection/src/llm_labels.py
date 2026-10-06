@@ -98,7 +98,7 @@ def extract_levels(gen_ids, scores, tok, level_ids):
         if tok.decode([tid]).strip() in tuple("0123456789"):
             lg = scores[j].float()
             per = torch.stack([torch.logsumexp(lg[ids], 0) for ids in level_ids])
-            rows.append(torch.softmax(per, 0).numpy())
+            rows.append(torch.softmax(per, 0).detach().cpu().numpy())   # the scores live on the GPU
             if len(rows) == len(LABELS):
                 return np.stack(rows).astype(np.float32)
     return None
