@@ -14,8 +14,10 @@ def _slice_key(ds, fallback):
     return fallback
 
 
-def load_series(series_dir, size=128, max_slices=None):
+def load_series(series_dir, size=128, max_slices=None, crop=1.0):
     """Return (D, size, size) float32 in [0, 1], or None if nothing decodes.
+    crop < 1 keeps only the central `crop` fraction of the field of view (height and width) before resizing,
+    so the knee gets more pixels.
 
     Handles compressed transfer syntaxes when pylibjpeg/gdcm are installed;
     unreadable slices are skipped.
@@ -31,6 +33,11 @@ def load_series(series_dir, size=128, max_slices=None):
             continue
         if img.ndim != 2:
             continue
+        if crop < 1.0:
+            h, w = img.shape
+            ch, cw = max(int(h * crop), 8), max(int(w * crop), 8)
+            y0, x0 = (h - ch) // 2, (w - cw) // 2
+            img = img[y0:y0 + ch, x0:x0 + cw]
         items.append((_slice_key(ds, i), cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)))
     if not items:
         return None
