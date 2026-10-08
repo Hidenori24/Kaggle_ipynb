@@ -18,7 +18,7 @@ from features import PLANES, pick_series
 
 
 # ---------------------------------------------------------------- data
-def study_volume(study_dir, series_df, size, k, center=1.0):
+def study_volume(study_dir, series_df, size, k, center=1.0, crop=1.0):
     """-> (uint8 volume (planes, k, size, size), plane mask, DICOM-header meta vector).
     center < 1 samples the k slices only from the central fraction of the series (edge slices rarely show the joint)."""
     vol = np.zeros((len(PLANES), k, size, size), np.uint8)
@@ -33,7 +33,7 @@ def study_volume(study_dir, series_df, size, k, center=1.0):
         vec, m_idx = series_meta(d)
         meta[p * N_NUM:(p + 1) * N_NUM] = vec
         mfr = m_idx if mfr is None else mfr
-        v = load_series(d, size=size)
+        v = load_series(d, size=size, crop=crop)
         if v is None:
             continue
         n = len(v)
@@ -47,7 +47,7 @@ def study_volume(study_dir, series_df, size, k, center=1.0):
     return vol, mask, meta
 
 
-def cache_volumes(df, series, root, size, k, cache_dir, name, n_jobs=4, chunk=64, center=1.0):
+def cache_volumes(df, series, root, size, k, cache_dir, name, n_jobs=4, chunk=64, center=1.0, crop=1.0):
     """Decode DICOMs once into an on-disk uint8 memmap. Returns (X memmap, plane mask, header meta)."""
     groups = dict(tuple(series.groupby("StudyInstanceUID")))
     uids = list(df["StudyInstanceUID"])
@@ -59,7 +59,7 @@ def cache_volumes(df, series, root, size, k, cache_dir, name, n_jobs=4, chunk=64
     t0 = time.time()
     for i in range(0, len(uids), chunk):
         part = uids[i:i + chunk]
-        res = Parallel(n_jobs=n_jobs)(delayed(study_volume)(Path(root) / u, groups.get(u), size, k, center)
+        res = Parallel(n_jobs=n_jobs)(delayed(study_volume)(Path(root) / u, groups.get(u), size, k, center, crop)
                                       for u in part)
         for j, (v, m, md) in enumerate(res):
             X[i + j], M[i + j], META[i + j] = v, m, md
@@ -83,26 +83,44 @@ class VolDS(torch.utils.data.Dataset):
 
 
 # ---------------------------------------------------------------- model
+_ARCH = {"resnet18": ("ResNet18_Weights", 512), "resnet34": ("ResNet34_Weights", 512), "resnet50": ("ResNet50_Weights", 2048)}
+
+
 class KneeNet(nn.Module):
-    def __init__(self, n_out=12, pretrained=True, drop=0.3, meta_dim=0):
+    """adj=False: every slice is one grey channel (the pretrained RGB filters are summed).
+    adj=True: the 3 input channels are the previous, the current and the next sampled slice of the same series, so the
+    pretrained first layer is used as it is and the network sees a little context along the slice axis."""
+
+    def __init__(self, n_out=12, pretrained=True, drop=0.3, meta_dim=0, adj=False, arch="resnet18"):
         super().__init__()
-        w = torchvision.models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
-        m = torchvision.models.resnet18(weights=w)
-        conv = nn.Conv2d(1, 64, 7, 2, 3, bias=False)
-        conv.weight.data = m.conv1.weight.data.sum(1, keepdim=True)  # RGB filters -> 1 channel
-        m.conv1, m.fc = conv, nn.Identity()
+        wname, feat = _ARCH[arch]
+        w = getattr(torchvision.models, wname).IMAGENET1K_V1 if pretrained else None
+        m = getattr(torchvision.models, arch)(weights=w)
+        self.adj, self.feat = adj, feat
+        if not adj:
+            conv = nn.Conv2d(1, 64, 7, 2, 3, bias=False)
+            conv.weight.data = m.conv1.weight.data.sum(1, keepdim=True)  # RGB filters -> 1 channel
+            m.conv1 = conv
+        m.fc = nn.Identity()
         self.backbone = m
-        self.attn = nn.Linear(512, 1)
+        self.attn = nn.Linear(feat, 1)
         self.drop = nn.Dropout(drop)
         self.meta_dim = meta_dim
         if meta_dim:   # DICOM-header features (scanner, slice thickness, ...) joined to the pooled image features
             self.meta_net = nn.Sequential(nn.Linear(meta_dim, 64), nn.ReLU(), nn.Dropout(0.2))
-        self.head = nn.Linear(len(PLANES) * 512 + (64 if meta_dim else 0), n_out)
+        self.head = nn.Linear(len(PLANES) * feat + (64 if meta_dim else 0), n_out)
 
     def forward(self, x, mask, meta=None):
         """x: (B,P,K,H,W) float in [0,1]; mask: (B,P) bool; meta: (B,meta_dim) when meta_dim > 0."""
         B, P, K, H, W = x.shape
-        f = self.backbone(((x - 0.45) / 0.225).reshape(B * P * K, 1, H, W)).view(B, P, K, -1)
+        x = (x - 0.45) / 0.225
+        if self.adj:   # (B,P,K,3,H,W): slices k-1, k, k+1 (edges repeat)
+            prev = torch.cat([x[:, :, :1], x[:, :, :-1]], 2)
+            nxt = torch.cat([x[:, :, 1:], x[:, :, -1:]], 2)
+            inp = torch.stack([prev, x, nxt], 3).reshape(B * P * K, 3, H, W)
+        else:
+            inp = x.reshape(B * P * K, 1, H, W)
+        f = self.backbone(inp).view(B, P, K, -1)
         a = torch.softmax(self.attn(f).squeeze(-1), dim=2).unsqueeze(-1)
         pooled = (a * f).sum(2) * mask.unsqueeze(-1).to(f.dtype)
         z = pooled.reshape(B, -1)
@@ -154,11 +172,12 @@ def per_label_auc(Y, P, labels):
 
 
 def fit(X, M, Y, tr_idx, evals, device, epochs=8, bs=8, lr=3e-4, pretrained=True, select="pseudo", ema=0.998,
-        META=None, log=print):
+        META=None, adj=False, arch="resnet18", log=print):
     """evals: {name: idx array} held-out sets. The epoch with the best `select` macro AUC is kept.
     ema: decay of an exponential moving average of the weights, which is what gets evaluated and returned
     (smooths out the late-epoch drift towards pseudo-label noise); None disables it."""
-    model = KneeNet(Y.shape[1], pretrained=pretrained, meta_dim=META.shape[1] if META is not None else 0).to(device)
+    model = KneeNet(Y.shape[1], pretrained=pretrained, meta_dim=META.shape[1] if META is not None else 0,
+                    adj=adj, arch=arch).to(device)
     dl = torch.utils.data.DataLoader(VolDS(X, M, Y, tr_idx, META), batch_size=bs, shuffle=True, num_workers=2,
                                      drop_last=len(tr_idx) > bs, pin_memory=device != "cpu")
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
