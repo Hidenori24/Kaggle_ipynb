@@ -150,14 +150,17 @@ def macro_auc(Y, P):
 
 
 @torch.no_grad()
-def predict(model, X, M, idx, device, bs=8, META=None):
+def predict(model, X, M, idx, device, bs=8, META=None, tta=0):
+    """tta>0: also average predictions of the volume shifted diagonally by +-tta px (training used +-8px shifts)."""
     model.eval()
     dl = torch.utils.data.DataLoader(VolDS(X, M, None, idx, META), batch_size=bs, num_workers=2)
     out = []
     for x, m, _, md in dl:
         with torch.autocast(device_type=device.split(":")[0], enabled=device != "cpu"):
-            logits = model(x.to(device).float() / 255, m.to(device), md.to(device) if model.meta_dim else None)
-            out.append(torch.sigmoid(logits.float()).cpu().numpy())
+            x = x.to(device).float() / 255; m = m.to(device); md = md.to(device) if model.meta_dim else None
+            views = [(0, 0)] + ([(tta, tta), (-tta, -tta)] if tta else [])
+            p = sum(torch.sigmoid(model(torch.roll(x, (dy, dx), (-2, -1)) if dy else x, m, md).float()) for dy, dx in views) / len(views)
+            out.append(p.cpu().numpy())
     return np.concatenate(out)
 
 
